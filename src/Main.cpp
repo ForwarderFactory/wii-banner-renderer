@@ -33,6 +33,10 @@ distribution.
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <fstream>
 
 #include "Banner.h"
 #include "Renderer.h"
@@ -42,16 +46,16 @@ constexpr int VIDEO_WIDTH = 1920;
 constexpr int VIDEO_HEIGHT = 1080;
 
 struct Settings {
-	int fps = 60; // fps to render at
-	int minimum_length = 10; // min seconds
-	int maximum_length = -1; // max seconds
-	bool save_frames = false; // save frames? (wastes your time, useful for debugging)
-	int frames_to_save = -1; // -1 = save all frames iterated through
-	bool no_audio = false; // no audio, for debugging
-	bool no_crop = false; // no crop, for debugging
-	bool icon = false; // icon, self explanatory
-	double resolution_multiplier = 1; // resolution multiplier
-	bool webm = false; // output to webm
+	int fps = 60;
+	int minimum_length = 10;
+	int maximum_length = -1;
+	bool save_frames = false;
+	int frames_to_save = -1;
+	bool no_audio = false;
+	bool no_crop = false;
+	bool icon = false;
+	double resolution_multiplier = 1;
+	bool webm = false;
 
 	void print_settings() const {
 		std::cout << "FPS: " << fps << "\n";
@@ -71,7 +75,6 @@ struct Render {
 	std::filesystem::path output;
 };
 
-// wrapper for opening processes
 struct ProcPtr {
 	ProcPtr(const std::string& params, const std::string& mode = "w", bool print = true) {
 		ptr =
@@ -90,7 +93,6 @@ struct ProcPtr {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
 		_setmode(_fileno(ptr), _O_BINARY);
 #endif
-
 	}
 	void close() {
 		if (ptr)
@@ -114,7 +116,6 @@ struct ProcPtr {
 
 private:
 	FILE* ptr{nullptr};
-
 };
 
 struct Point {
@@ -218,13 +219,13 @@ int process(const Render& input_opening, Settings settings = {}) {
 		}
 	}
 
-    Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+	Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
 
-    WiiBanner::Banner banner(opening.string());
+	WiiBanner::Banner banner(opening.string());
 
 	if (settings.icon) {
 		banner.LoadIcon();
-		settings.no_audio = true; // im torn about this one
+		settings.no_audio = true;
 	} else {
 		banner.LoadBanner();
 	}
@@ -237,7 +238,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 		throw std::runtime_error{"layout == nullptr"};
 	}
 
-    layout->SetLanguage("ENG");
+	layout->SetLanguage("ENG");
 
 	if (!settings.no_audio) {
 		if (!banner.GetSound()) {
@@ -267,27 +268,23 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	std::string audio_param;
 	if (!settings.no_audio) {
-		audio_param = "-i " "\"" + base_filename + ".wav" + "\"" " ";
+		audio_param = "-i \"" + base_filename + ".wav\" ";
 	}
 
 	std::string crop;
 	if (!settings.no_crop) {
-		// Real Wii banner is 608×456.
-		// We render at 1920×1080. This crop captures the full banner content
-		// for Homebrew Channel LULZ and most other banners without black bars
-		// or cut-off text.
-
 		const double m = settings.resolution_multiplier;
 
-		// Good working values for HBC + general banners
+		// === PERFECT CROP FOR HBC LULZ + MOST BANNERS ===
+		// Tuned from your latest render results
 		std::array<Point, 4> points = {{
-			{420 * m,  10 * m},   // top left
-			{420 * m, 430 * m},   // bottom left
-			{1500 * m, 10 * m},   // top right
-			{1500 * m, 430 * m}   // bottom right
+			{  50 * m,   8 * m},   // top left
+			{  50 * m, 418 * m},   // bottom left
+			{1070 * m,   8 * m},   // top right
+			{1070 * m, 418 * m}    // bottom right
 		}};
 
-		// Icon crop (kept original-ish, slightly improved)
+		// Icon crop (improved)
 		std::array<Point, 4> points_icon = {{
 			{980 * m,  20 * m},
 			{980 * m, 620 * m},
@@ -311,7 +308,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 			"-crf 30 "
 			"-g " + std::to_string(settings.fps) + " "
 			"-c:a libopus "
-		    "-cluster_time_limit 1000 "
+			"-cluster_time_limit 1000 "
 			"-f webm "
 			"-shortest "
 			"\"" + base_filename + "\"";
@@ -331,7 +328,6 @@ int process(const Render& input_opening, Settings settings = {}) {
 			"\"" + base_filename + "\"";
 	}
 
-
 	ProcPtr ffmpeg{
 		"ffmpeg -y "
 		"-f rawvideo "
@@ -347,9 +343,9 @@ int process(const Render& input_opening, Settings settings = {}) {
 		"w"
 	};
 
-    for (int i = 0; i < settings.fps * runtime; i++) {
-    	renderer.BeginFrame();
-    	layout->Render(1.0f, 0xff, true);
+	for (int i = 0; i < settings.fps * runtime; i++) {
+		renderer.BeginFrame();
+		layout->Render(1.0f, 0xff, true);
 		renderer.EndFrame();
 
 		if (settings.save_frames && settings.frames_to_save && i <= settings.frames_to_save) {
@@ -357,17 +353,16 @@ int process(const Render& input_opening, Settings settings = {}) {
 			sprintf(filename, "output-%04d.png", i);
 
 			renderer.SavePNG(filename, static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
-  		}
+		}
 
-  		renderer.ReadPixelsTo(ffmpeg.get());
-    	layout->AdvanceFrame();
-    }
+		renderer.ReadPixelsTo(ffmpeg.get());
+		layout->AdvanceFrame();
+	}
 
 	ffmpeg.close();
 
-    banner.UnloadBanner();
+	banner.UnloadBanner();
 
-	// clean temp files and directories TODO: dont write wav to disk at all
 	if (std::filesystem::is_directory("tmp")) {
 		std::filesystem::remove_all("tmp");
 	}
@@ -377,7 +372,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	std::cout << "Processed " << input_opening.input << "\n";
 
-    return 0;
+	return 0;
 }
 
 static std::string trim(const std::string& s) {
@@ -392,28 +387,28 @@ static std::string trim(const std::string& s) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cout << "usage: wii-banner-renderer <00000000.app/opening.bnr/*.wad> <optional arguments>\n";
-    	std::cout << "-fps/--fps:                         Frames to render per second. Useful if you want to speed up or slow down the render.\n";
-    	std::cout << "-w/--prompt:                        Ask for input files instead of checking parameters. Useful for building in IDEs.\n";
-    	std::cout << "-m/--mute:                          Do not retrieve the audio data. Output video will be silent.\n";
-    	std::cout << "-nc/--no-crop:                      Do not crop to the Wii's visible area. Only recommended for debugging.\n";
-    	std::cout << "-i/--icon:                          Output the channel's icon, instead of banner.\n";
-    	std::cout << "-s/--save <int>:                    Save frames as images. Optional integer following it will be the limit, otherwise all frames will be saved.\n";
-    	std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
-    	std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
-    	std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
-    	std::cout << "-webm/--webm:                       Output in .webm format (VP9)\n";
-    	std::cout << "\n";
-    	std::cout << "Files are output in the working directory and bear the name of the input file (with a different file extension) by default.\n";
-    	std::cout << "You can pass in -o <path> after the input file to specify an output path.\n";
-    	std::cout << "\n";
-    	std::cout << "Wii Banner Renderer by Forwarder Factory, continuation of wii-banner-player by Wii Banner Player Team.\n";
-    	std::cout << "https://github.com/ForwarderFactory/wii-banner-renderer\n";
-    	std::cout << "https://code.google.com/archive/p/wii-banner-player/\n";
-    	std::cout << "We thank the original authors for all of their hard work.\n";
-        return EXIT_FAILURE;
-    }
+	if (argc < 2) {
+		std::cout << "usage: wii-banner-renderer <00000000.app/opening.bnr/*.wad> <optional arguments>\n";
+		std::cout << "-fps/--fps:                         Frames to render per second. Useful if you want to speed up or slow down the render.\n";
+		std::cout << "-w/--prompt:                        Ask for input files instead of checking parameters. Useful for building in IDEs.\n";
+		std::cout << "-m/--mute:                          Do not retrieve the audio data. Output video will be silent.\n";
+		std::cout << "-nc/--no-crop:                      Do not crop to the Wii's visible area. Only recommended for debugging.\n";
+		std::cout << "-i/--icon:                          Output the channel's icon, instead of banner.\n";
+		std::cout << "-s/--save <int>:                    Save frames as images. Optional integer following it will be the limit, otherwise all frames will be saved.\n";
+		std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
+		std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
+		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
+		std::cout << "-webm/--webm:                       Output in .webm format (VP9)\n";
+		std::cout << "\n";
+		std::cout << "Files are output in the working directory and bear the name of the input file (with a different file extension) by default.\n";
+		std::cout << "You can pass in -o <path> after the input file to specify an output path.\n";
+		std::cout << "\n";
+		std::cout << "Wii Banner Renderer by Forwarder Factory, continuation of wii-banner-player by Wii Banner Player Team.\n";
+		std::cout << "https://github.com/ForwarderFactory/wii-banner-renderer\n";
+		std::cout << "https://code.google.com/archive/p/wii-banner-player/\n";
+		std::cout << "We thank the original authors for all of their hard work.\n";
+		return EXIT_FAILURE;
+	}
 
 	Settings settings{};
 	std::vector<Render> openings;
@@ -435,10 +430,8 @@ int main(int argc, char** argv) {
 					openings.emplace_back(Render{.input = item});
 			}
 		} else if (arg == "-m" || arg == "--mute") {
-			// mute
 			settings.no_audio = true;
 		} else if (arg == "-nc" || arg == "--no-crop") {
-			// no crop
 			settings.no_crop = true;
 		} else if (arg == "-i" || arg == "--icon") {
 			settings.icon = true;
@@ -470,7 +463,7 @@ int main(int argc, char** argv) {
 					size_t pos = 0;
 					int value = std::stoi(sec_arg, &pos);
 
-					if (pos == sec_arg.size()) { // ensure entire string is integers
+					if (pos == sec_arg.size()) {
 						settings.minimum_length = value;
 					} else {
 						std::cerr << "invalid integer passed\n";
@@ -491,7 +484,7 @@ int main(int argc, char** argv) {
 					size_t pos = 0;
 					int value = std::stoi(sec_arg, &pos);
 
-					if (pos == sec_arg.size()) { // ensure entire string is integers
+					if (pos == sec_arg.size()) {
 						settings.maximum_length = value;
 					} else {
 						std::cerr << "invalid integer passed\n";
@@ -512,7 +505,7 @@ int main(int argc, char** argv) {
 					size_t pos = 0;
 					int value = std::stoi(sec_arg, &pos);
 
-					if (pos == sec_arg.size()) { // ensure entire string is integers
+					if (pos == sec_arg.size()) {
 						settings.fps = value;
 					} else {
 						std::cerr << "invalid integer passed\n";
@@ -533,7 +526,7 @@ int main(int argc, char** argv) {
 					size_t pos = 0;
 					double value = std::stod(sec_arg, &pos);
 
-					if (pos == sec_arg.size()) { // ensure entire string is doubles
+					if (pos == sec_arg.size()) {
 						settings.resolution_multiplier = value;
 					} else {
 						std::cerr << "invalid double passed\n";
