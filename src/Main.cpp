@@ -275,16 +275,16 @@ int process(const Render& input_opening, Settings settings = {}) {
 	if (!settings.no_crop) {
 		const double m = settings.resolution_multiplier;
 
-		// === PERFECT CROP FOR HBC LULZ + MOST BANNERS ===
-		// Tuned from your latest render results
+		// Final tuned crop for Homebrew Channel LULZ
+		// Starts further left to stop pushing content right
 		std::array<Point, 4> points = {{
-			{  50 * m,   8 * m},   // top left
-			{  50 * m, 418 * m},   // bottom left
-			{1070 * m,   8 * m},   // top right
-			{1070 * m, 418 * m}    // bottom right
+			{  10 * m,   5 * m},   // top left
+			{  10 * m, 425 * m},   // bottom left
+			{1100 * m,   5 * m},   // top right
+			{1100 * m, 425 * m}    // bottom right
 		}};
 
-		// Icon crop (improved)
+		// Icon crop
 		std::array<Point, 4> points_icon = {{
 			{980 * m,  20 * m},
 			{980 * m, 620 * m},
