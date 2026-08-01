@@ -275,16 +275,15 @@ int process(const Render& input_opening, Settings settings = {}) {
 	if (!settings.no_crop) {
 		const double m = settings.resolution_multiplier;
 
-		// Final tuned crop for Homebrew Channel LULZ
-		// Starts further left to stop pushing content right
+		// FINAL correct crop after analysing the actual video frames
 		std::array<Point, 4> points = {{
-			{  10 * m,   5 * m},   // top left
-			{  10 * m, 425 * m},   // bottom left
-			{1100 * m,   5 * m},   // top right
-			{1100 * m, 425 * m}    // bottom right
+			{  0 * m,  280 * m},   // top left
+			{  0 * m,  700 * m},   // bottom left
+			{1280 * m, 280 * m},   // top right
+			{1280 * m, 700 * m}    // bottom right
 		}};
 
-		// Icon crop
+		// Icon (unchanged)
 		std::array<Point, 4> points_icon = {{
 			{980 * m,  20 * m},
 			{980 * m, 620 * m},
@@ -296,7 +295,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 		crop += ToFFmpegCrop(settings.icon ? GetCrop(points_icon) : GetCrop(points));
 		crop += ",scale=trunc(iw/2)*2:trunc(ih/2)*2\" ";
 	}
-
+	
 	std::string output_format;
 
 	if (settings.webm)
