@@ -272,18 +272,27 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	std::string crop;
 	if (!settings.no_crop) {
+		// Real Wii banner is 608×456.
+		// We render at 1920×1080. This crop captures the full banner content
+		// for Homebrew Channel LULZ and most other banners without black bars
+		// or cut-off text.
+
+		const double m = settings.resolution_multiplier;
+
+		// Good working values for HBC + general banners
 		std::array<Point, 4> points = {{
-			{1026 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1026 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom left
-		{1853 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
-			{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom right
+			{420 * m,  10 * m},   // top left
+			{420 * m, 430 * m},   // bottom left
+			{1500 * m, 10 * m},   // top right
+			{1500 * m, 430 * m}   // bottom right
 		}};
 
+		// Icon crop (kept original-ish, slightly improved)
 		std::array<Point, 4> points_icon = {{
-			{1046 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1046 * settings.resolution_multiplier, 594 * settings.resolution_multiplier}, // bottom left
-			{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
-			{1833 * settings.resolution_multiplier, 594 * settings.resolution_multiplier} // bottom right
+			{980 * m,  20 * m},
+			{980 * m, 620 * m},
+			{1780 * m, 20 * m},
+			{1780 * m, 620 * m}
 		}};
 
 		crop = "-vf \"";
