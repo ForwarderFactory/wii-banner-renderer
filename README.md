@@ -3,6 +3,7 @@
 [![Build Windows Release](https://github.com/jacnils/wii-banner-renderer/actions/workflows/windows.yml/badge.svg)](https://github.com/jacnils/wii-banner-renderer/actions/workflows/windows.yml)
 
 [Showcase](https://www.youtube.com/watch?v=_UVSLDDvSd0)
+[Web version](https://forwarderfactory.com/banner-renderer/)
 
 **Note: Experimental, no support.**
 
@@ -14,8 +15,7 @@ macOS is unsupported, and will remain unsupported unless
 someone wishes to implement support for it, which seems unlikely
 considering it doesn't even support OpenGL anymore... sigh.
 
-For Mac users, and everyone else, really, we plan to set up a website
-that can handle the work this program does automatically.
+For Mac users, and everyone else, really, please check out the [web version](https://forwarderfactory.com/banner-renderer/).
 
 ## Usage
 
