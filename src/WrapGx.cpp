@@ -44,6 +44,8 @@ distribution.
 static u8 g_texture_decode_buffer[1024 * 1024 * 4];
 
 static float g_color_registers[3][4];
+static float g_kcolor_registers[4][4];
+static u8 g_tev_swap_tables[4] = { 0xe4, 0xc0, 0xd5, 0xea };
 
 // TODO: make this 0, currently causes issues though, figure that out :p
 static const GLuint g_texmap_start_index = 1;
@@ -381,10 +383,19 @@ struct TevStageProps
 	u8 color_op : 4;
 	u8 alpha_op : 4;
 
-	// outputs
-	u8 color_regid : 1;
-	u8 alpha_regid : 1;
-	u8 pad : 6;
+	// operations and outputs
+	u8 color_bias;
+	u8 color_scale;
+	u8 color_clamp;
+	u8 color_regid;
+	u8 alpha_bias;
+	u8 alpha_scale;
+	u8 alpha_clamp;
+	u8 alpha_regid;
+	u8 kcolor_sel;
+	u8 kalpha_sel;
+	u8 ras_swap;
+	u8 tex_swap;
 
 	u8 texcoord;
 
@@ -422,6 +433,7 @@ void CompiledTevStages::Enable()
 
 	// TODO: cache value of GetUniformLocation
 	glUniform4fv(glGetUniformLocation(program, "registers"), 3, g_color_registers[0]);
+	glUniform4fv(glGetUniformLocation(program, "kcolors"), 4, g_kcolor_registers[0]);
 }
 
 void CompiledTevStages::Compile(const TevStages& stages)
@@ -466,13 +478,14 @@ void CompiledTevStages::Compile(const TevStages& stages)
 	for (unsigned int i = 0; i != sampler_count; ++i)
 		frag_ss << "uniform sampler2D textures" << i << ';';
 	frag_ss << "uniform vec4 registers[3]" ";";
-	//frag_ss << "uniform vec4 color_constant" ";";
-	frag_ss << "vec4 color_constant" ";";
+	frag_ss << "uniform vec4 kcolors[4]" ";";
 
 	frag_ss << "void main(){";
 
-	frag_ss << "vec4 color_previous" ";";
-	frag_ss << "vec4 color_texture" ";";
+	frag_ss << "vec4 color_previous = vec4(0.0)" ";";
+	frag_ss << "vec4 color_texture = vec4(0.0)" ";";
+	frag_ss << "vec4 color_constant = vec4(0.0)" ";";
+	frag_ss << "vec4 color_raster = vec4(0.0)" ";";
 	for (unsigned int i = 0; i != 3; ++i)
 		frag_ss << "vec4 color_registers" << i << " = registers[" << i << "]" ";";
 
@@ -488,8 +501,8 @@ void CompiledTevStages::Compile(const TevStages& stages)
 		"color_registers" "2" ".aaa",
 		"color_texture" ".rgb",
 		"color_texture" ".aaa",
-		"gl_Color" ".rgb",
-		"gl_Color" ".aaa",
+		"color_raster" ".rgb",
+		"color_raster" ".aaa",
 		"vec3(1.0)",
 		"vec3(0.5)",
 		"color_constant" ".rgb",
@@ -503,7 +516,7 @@ void CompiledTevStages::Compile(const TevStages& stages)
 		"color_registers" "1" ".a",
 		"color_registers" "2" ".a",
 		"color_texture" ".a",
-		"gl_Color" ".a",
+		"color_raster" ".a",
 		"color_constant" ".a",
 		"0.0",
 	};
@@ -522,9 +535,55 @@ void CompiledTevStages::Compile(const TevStages& stages)
 	{
 		// current texture color
 		// 0xff is a common value for a disabled texture
+		frag_ss << "color_texture = vec4(0.0);";
 		if (stage.texmap < sampler_count)
 			frag_ss << "color_texture = texture2D(textures" << (int)stage.texmap
 				<< ", gl_TexCoord[" << (int)stage.texcoord << "].xy);";
+
+		static const char components[] = { 'r', 'g', 'b', 'a' };
+		auto const write_swizzle = [&](u8 swap)
+		{
+			for (unsigned int i = 0; i != 4; ++i)
+				frag_ss << components[(swap >> (i * 2)) & 3];
+		};
+
+		frag_ss << "color_texture = color_texture.";
+		write_swizzle(stage.tex_swap);
+		frag_ss << ";color_raster = gl_Color.";
+		write_swizzle(stage.ras_swap);
+		frag_ss << ';';
+
+		static const char* const konst_fractions[] =
+		{
+			"1.0", "0.874509804", "0.749019608", "0.623529412",
+			"0.501960784", "0.376470588", "0.250980392", "0.125490196",
+		};
+
+		if (stage.kcolor_sel < 8)
+			frag_ss << "color_constant.rgb = vec3(" << konst_fractions[stage.kcolor_sel] << ");";
+		else if (stage.kcolor_sel < 12)
+			frag_ss << "color_constant.rgb = vec3(0.0);";
+		else if (stage.kcolor_sel < 16)
+			frag_ss << "color_constant.rgb = kcolors[" << (int)(stage.kcolor_sel - 12) << "].rgb;";
+		else
+		{
+			static const char* const swizzles[] = { "rrr", "ggg", "bbb", "aaa" };
+			const u8 selector = stage.kcolor_sel - 16;
+			frag_ss << "color_constant.rgb = kcolors[" << (int)(selector & 3) << "]."
+				<< swizzles[selector >> 2] << ";";
+		}
+
+		if (stage.kalpha_sel < 8)
+			frag_ss << "color_constant.a = " << konst_fractions[stage.kalpha_sel] << ";";
+		else if (stage.kalpha_sel < 16)
+			frag_ss << "color_constant.a = 0.0;";
+		else
+		{
+			static const char components[] = { 'r', 'g', 'b', 'a' };
+			const u8 selector = stage.kalpha_sel - 16;
+			frag_ss << "color_constant.a = kcolors[" << (int)(selector & 3) << "]."
+				<< components[selector >> 2] << ";";
+		}
 
 		frag_ss << '{';
 
@@ -545,13 +604,10 @@ void CompiledTevStages::Compile(const TevStages& stages)
 			<< color_inputs[stage.color_d] << ','
 			<< alpha_inputs[stage.alpha_d] << ");";
 
-		auto const write_tevop = [&](u8 tevop, const char swiz[])
+		auto const write_tevop = [&](u8 tevop, u8 tevbias, u8 tevscale, u8 clamp, const char swiz[])
 		{
 			std::string condition_end(" ? c : vec4(0.0))");
 			condition_end += swiz;
-
-			// d is added with every op except SUB
-			frag_ss << "result" << swiz << " = d" << swiz << ((1 == tevop) ? '-' : '+');
 
 			const char* const compare_op = (tevop & 1) ? "==" : ">";
 
@@ -559,22 +615,41 @@ void CompiledTevStages::Compile(const TevStages& stages)
 			{
 			case 0: // ADD
 			case 1: // SUB
-				frag_ss << "mix(a" << swiz << ", b" << swiz << ", c" << swiz << ")";
+			{
+				static const char* const biases[] = { "0.0", "0.5", "-0.5", "0.0" };
+				static const char* const scales[] = { "1.0", "2.0", "4.0", "0.5" };
+				const bool is_rgb = swiz[1] == 'r';
+				const char* const clamp_min = is_rgb
+					? (clamp ? "vec3(0.0)" : "vec3(-4.0)")
+					: (clamp ? "0.0" : "-4.0");
+				const char* const clamp_max = is_rgb
+					? (clamp ? "vec3(1.0)" : "vec3(4.0)")
+					: (clamp ? "1.0" : "4.0");
+
+				frag_ss << "result" << swiz << " = clamp((d" << swiz
+					<< ((1 == tevop) ? '-' : '+')
+					<< "mix(a" << swiz << ", b" << swiz << ", c" << swiz << ") + "
+					<< biases[tevbias & 3] << ") * " << scales[tevscale & 3]
+					<< ", " << clamp_min << ", " << clamp_max << ")";
 				break;
+			}
 
 			case 8: // COMP_R8_GT
 			case 9: // COMP_R8_EQ
-				frag_ss << "((a.r " << compare_op << " b.r)" << condition_end;
+				frag_ss << "result" << swiz << " = d" << swiz << "+((a.r "
+					<< compare_op << " b.r)" << condition_end;
 				break;
 
 			case 10: // COMP_GR16_GT
 			case 11: // COMP_GR16_EQ
-				frag_ss << "((dot(a.rgb, comp16) " << compare_op << " dot(b.rgb, comp16))" << condition_end;
+				frag_ss << "result" << swiz << " = d" << swiz
+					<< "+((dot(a.rgb, comp16) " << compare_op << " dot(b.rgb, comp16))" << condition_end;
 				break;
 
 			case 12: // COMP_BGR24_GT
 			case 13: // COMP_BGR24_EQ
-				frag_ss << "((dot(a.rgb, comp24) " << compare_op << " dot(b.rgb, comp24))" << condition_end;
+				frag_ss << "result" << swiz << " = d" << swiz
+					<< "+((dot(a.rgb, comp24) " << compare_op << " dot(b.rgb, comp24))" << condition_end;
 				break;
 
 			// TODO:
@@ -583,7 +658,7 @@ void CompiledTevStages::Compile(const TevStages& stages)
 			//	break;
 
 			default:
-				frag_ss << "(vec4(0.0))" << swiz;
+				frag_ss << "result" << swiz << " = d" << swiz;
 				std::cout << "Unsupported tevop!! " << (int)tevop << '\n';
 				break;
 			}
@@ -594,13 +669,8 @@ void CompiledTevStages::Compile(const TevStages& stages)
 		// TODO: could eliminate this result variable
 		frag_ss << "vec4 result;";
 
-		if (stage.color_op != stage.alpha_op)
-		{
-			write_tevop(stage.color_op, ".rgb");
-			write_tevop(stage.alpha_op, ".a");
-		}
-		else
-			write_tevop(stage.color_op, "");
+		write_tevop(stage.color_op, stage.color_bias, stage.color_scale, stage.color_clamp, ".rgb");
+		write_tevop(stage.alpha_op, stage.alpha_bias, stage.alpha_scale, stage.alpha_clamp, ".a");
 
 		// output register
 		frag_ss << output_registers[stage.color_regid] << ".rgb = result" ".rgb;";
@@ -742,9 +812,17 @@ void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color)
 
 void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel)
 {
-	//ActiveStage(tevstage);
+	ActiveStage(tevstage);
 
-	// TODO:
+	TevStageProps& ts = g_active_stages[tevstage];
+	ts.ras_swap = g_tev_swap_tables[ras_sel & 3];
+	ts.tex_swap = g_tev_swap_tables[tex_sel & 3];
+}
+
+void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a)
+{
+	g_tev_swap_tables[table & 3] = (r & 3) | ((g & 3) << 2)
+		| ((b & 3) << 4) | ((a & 3) << 6);
 }
 
 void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
@@ -759,18 +837,26 @@ void 	GX_SetTevColorS10 (u8 tev_regid, GXColorS10 color)
 		g_color_registers[tev_regid - 1][i] = (float)(&color.r)[i] / 255;
 }
 
+void 	GX_SetTevKColor (u8 tev_regid, GXColor color)
+{
+	for (unsigned int i = 0; i != 4; ++i)
+		g_kcolor_registers[tev_regid][i] = (float)(&color.r)[i] / 255;
+}
+
 void 	GX_SetTevKAlphaSel (u8 tevstage, u8 sel)
 {
 	ActiveStage(tevstage);
 
-	// TODO:
+	TevStageProps& ts = g_active_stages[tevstage];
+	ts.kalpha_sel = sel & 0x1f;
 }
 
 void 	GX_SetTevKColorSel (u8 tevstage, u8 sel)
 {
 	ActiveStage(tevstage);
 
-	// TODO:
+	TevStageProps& ts = g_active_stages[tevstage];
+	ts.kcolor_sel = sel & 0x1f;
 }
 
 void 	GX_SetTevAlphaIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
@@ -791,6 +877,9 @@ void 	GX_SetTevAlphaOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp
 	TevStageProps& ts = g_active_stages[tevstage];
 	ts.alpha_regid = tevregid;
 	ts.alpha_op = tevop;
+	ts.alpha_bias = tevbias;
+	ts.alpha_scale = tevscale;
+	ts.alpha_clamp = clamp;
 }
 
 void 	GX_SetTevColorIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
@@ -811,6 +900,9 @@ void 	GX_SetTevColorOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp
 	TevStageProps& ts = g_active_stages[tevstage];
 	ts.color_regid = tevregid;
 	ts.color_op = tevop;
+	ts.color_bias = tevbias;
+	ts.color_scale = tevscale;
+	ts.color_clamp = clamp;
 }
 
 void 	GX_SetNumTevStages (u8 num)

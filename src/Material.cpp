@@ -136,7 +136,18 @@ void Material::Load(std::istream& file)
 	}
 	else
 	{
-		// TODO:
+		tev_swap_table[0].r = 0;
+		tev_swap_table[0].g = 1;
+		tev_swap_table[0].b = 2;
+		tev_swap_table[0].a = 3;
+
+		for (unsigned int i = 1; i != 4; ++i)
+		{
+			tev_swap_table[i].r = i - 1;
+			tev_swap_table[i].g = i - 1;
+			tev_swap_table[i].b = i - 1;
+			tev_swap_table[i].a = 3;
+		}
 	}
 
 	// ind srt
@@ -272,6 +283,7 @@ void Material::Load(std::istream& file)
 		blend_mode.dst_factor = 5;
 		blend_mode.logical_op = 3;
 	}
+
 }
 
 void Material::ApplyTextures(const Resources &resources) const {
@@ -343,6 +355,10 @@ void Material::Apply(const Resources& resources) const
 	for (unsigned int i = 0; i != 3; ++i)
 		GX_SetTevColorS10(GX_TEVREG0 + i, color_regs[i]);
 
+	// konst colors
+	for (unsigned int i = 0; i != 4; ++i)
+		GX_SetTevKColor(i, color_constants[i]);
+
 	// texture coord gen
 	glMatrixMode(GL_TEXTURE);
 	{
@@ -384,6 +400,10 @@ void Material::Apply(const Resources& resources) const
 
 	// tev stages
 	{
+	for (unsigned int i = 0; i != 4; ++i)
+		GX_SetTevSwapModeTable(i, tev_swap_table[i].r, tev_swap_table[i].g,
+			tev_swap_table[i].b, tev_swap_table[i].a);
+
 	int i = 0;
 	for (auto& ts : tev_stages)
 	{
@@ -391,11 +411,11 @@ void Material::Apply(const Resources& resources) const
 		GX_SetTevSwapMode(i, ts.ras_sel, ts.tex_sel);
 
 		GX_SetTevColorIn(i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
-		GX_SetTevColorOp(i, ts.color_in.op, ts.color_in.bias, ts.color_in.bias, ts.color_in.bias, ts.color_in.reg_id);
+		GX_SetTevColorOp(i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
 		GX_SetTevKColorSel(i, ts.color_in.constant_sel);
 
 		GX_SetTevAlphaIn(i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
-		GX_SetTevAlphaOp(i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.bias, ts.alpha_in.bias, ts.alpha_in.reg_id);
+		GX_SetTevAlphaOp(i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
 		GX_SetTevKAlphaSel(i, ts.alpha_in.constant_sel);
 
 		GX_SetTevIndirect(i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,

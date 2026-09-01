@@ -90,6 +90,7 @@ void 	GX_SetAlphaCompare (u8 comp0, u8 ref0, u8 aop, u8 comp1, u8 ref1);
 
 void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color);
 void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel);
+void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a);
 
 void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
 	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a);
@@ -104,6 +105,7 @@ void 	GX_SetTevColorIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d);
 void 	GX_SetTevColorOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp, u8 tevregid);
 
 void 	GX_SetTevColorS10 (u8 tev_regid, GXColorS10 color);
+void 	GX_SetTevKColor (u8 tev_regid, GXColor color);
 
 void 	GX_SetNumTevStages (u8 num);
 
