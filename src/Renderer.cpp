@@ -33,7 +33,9 @@ Renderer::Renderer(int width, int height)
     GX_Init(0, 0);
     glViewport(0, 0, width, height);
 
-    glOrtho(0.0, 1.0, 1.0, 0.0, -1000.0, 1000.0);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1000.0, 1000.0);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
