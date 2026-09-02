@@ -24,6 +24,8 @@ distribution.
 #ifndef WII_BNR_TEXTBOX_H_
 #define WII_BNR_TEXTBOX_H_
 
+#include <string>
+
 #include "Pane.h"
 
 namespace WiiBanner
@@ -39,7 +41,8 @@ public:
 	void Load(std::istream& file);
 
 private:
-	void Draw(const Resources& resources, u8 render_alpha, Vec2f adjust) const;
+	void Draw(const Resources& resources, u8 render_alpha) const override;
+	void ProcessHermiteKey(const KeyType& type, float value) override;
 
 	u16 material_index, font_index;
 
@@ -47,10 +50,10 @@ private:
 
 	GXColor colors[2];	// top and bottom apparently
 
-	float width, height;	// character width and height ?
+	float font_width, font_height;
 	float space_char, space_line;
 
-	std::wstring text;
+	std::u16string text;
 };
 
 }
