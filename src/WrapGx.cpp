@@ -536,7 +536,7 @@ void CompiledTevStages::Compile(const TevStages& stages)
 		// current texture color
 		// 0xff is a common value for a disabled texture
 		frag_ss << "color_texture = vec4(0.0);";
-		if (stage.texmap < sampler_count)
+		if (stage.texmap < sampler_count && stage.texcoord < sampler_count)
 			frag_ss << "color_texture = texture2D(textures" << (int)stage.texmap
 				<< ", gl_TexCoord[" << (int)stage.texcoord << "].xy);";
 
@@ -652,10 +652,36 @@ void CompiledTevStages::Compile(const TevStages& stages)
 					<< "+((dot(a.rgb, comp24) " << compare_op << " dot(b.rgb, comp24))" << condition_end;
 				break;
 
-			// TODO:
-			case 14: // COMP_RGB8_GT
-			case 15: // COMP_RGB8_EQ
-			//	break;
+			case 14: // COMP_RGB8_GT / COMP_A8_GT
+			case 15: // COMP_RGB8_EQ / COMP_A8_EQ
+			{
+				const bool is_rgb = swiz[1] == 'r';
+
+				if (is_rgb)
+				{
+					const char* cmp = (tevop == 14)
+						? "greaterThan(a.rgb, b.rgb)"
+						: "equal(a.rgb, b.rgb)";
+
+					frag_ss << "result" << swiz
+							<< " = d" << swiz
+							<< "+((all(" << cmp << "))"
+							<< condition_end;
+				}
+				else
+				{
+					const char* cmp = (tevop == 14)
+						? "a.a > b.a"
+						: "a.a == b.a";
+
+					frag_ss << "result" << swiz
+							<< " = d" << swiz
+							<< "+((" << cmp << ")"
+							<< condition_end;
+				}
+
+				break;
+			}
 
 			default:
 				frag_ss << "result" << swiz << " = d" << swiz;

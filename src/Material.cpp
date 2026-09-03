@@ -153,30 +153,23 @@ void Material::Load(std::istream& file)
 	// ind srt
 	for (u32 i = 0; i != flags.ind_srt; ++i)
 	{
-		// TODO: read des guys
-		//file >> BE >> translate.x >> translate.y >> rotate >> scale.x >> scale.y;
+		IndSrt srt{};
 
-		for (u32 i = 0; i != flags.ind_srt; ++i)
-		{
-			IndSrt srt{};
+		file >> BE
+			>> srt.translate_s
+			>> srt.translate_t
+			>> srt.scale_s
+			>> srt.scale_t
+			>> srt.rotate;
 
-			file >> BE
-				 >> srt.translate_s
-				 >> srt.translate_t
-				 >> srt.scale_s
-				 >> srt.scale_t
-				 >> srt.rotate;
-
-			std::cout << "IndSrt: "
+		std::cout << "IndSrt: "
 		  << srt.translate_s << ", "
 		  << srt.translate_t << ", "
 		  << srt.scale_s << ", "
 		  << srt.scale_t << ", "
 		  << srt.rotate << '\n';
 
-			ind_srts.push_back(srt);
-		}
-
+		ind_srts.push_back(srt);
 
 		//std::cout << "ind_texture: SRT\n";
 	}
@@ -191,9 +184,8 @@ void Material::Load(std::istream& file)
 
 		file.ignore(1);
 
-		//std::cout << "ind_texture: " << name << "tex_coord: " << (int)tex_coord
-		//	<< " tex_map: " << (int)tex_map << '\n';
-		//std::cin.get();
+		std::cout << "ind_texture: " << name << "tex_coord: " << (int)tex_coord
+			<< " tex_map: " << (int)tex_map << '\n';
 
 		std::cout << "Ind Stages not yet supported !!\n";
 	}
@@ -461,8 +453,7 @@ void Material::ProcessHermiteKey(const KeyType& type, float value)
 	{
 		if (type.target < 5 && type.index < flags.ind_srt) //&& type.index < ind_srts.size())
 		{
-			std::cout << "ANIMATION_TYPE_IND_MATERIAL not supported yet, todo fix this shit";
-			//(&ind_srts[type.index].translate_x)[type.target] = value;
+			(&ind_srts[type.index].translate_s)[type.target] = value;
 			return;
 		}
 		return;	// TODO: remove this return
