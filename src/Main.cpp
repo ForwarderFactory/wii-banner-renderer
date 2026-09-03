@@ -273,15 +273,15 @@ int process(const Render& input_opening, Settings settings = {}) {
 	std::string crop;
 	if (!settings.no_crop) {
 		std::array<Point, 4> points = {{
-			{1026 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1026 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom left
-		{1853 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
+			{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top left
+			{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom left
+		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top right
 			{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom right
 		}};
 
 		std::array<Point, 4> points_icon = {{
-			{1046 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1046 * settings.resolution_multiplier, 594 * settings.resolution_multiplier}, // bottom left
+			{1146 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
+			{1146 * settings.resolution_multiplier, 594 * settings.resolution_multiplier}, // bottom left
 			{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
 			{1833 * settings.resolution_multiplier, 594 * settings.resolution_multiplier} // bottom right
 		}};
