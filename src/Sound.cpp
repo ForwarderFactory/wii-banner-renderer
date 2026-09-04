@@ -447,11 +447,11 @@ bool Sound::Load(std::istream& file)
 			    << " rate=" << sampleRate
 			    << "\n";
 
-	    if (sampleCount == 0 || channels == 0)
-	    {
-		    std::cout << "Invalid BNS\n";
-		    return false;
-	    }
+	    //if (sampleCount == 0 || channels == 0)
+	    //{
+		//    std::cout << "Invalid BNS\n";
+		//    return false;
+	    //}
 
 	    std::cout << "Resizing PCM buffer\n";
 	    samples.resize(sampleCount * channels);
@@ -614,7 +614,16 @@ void Sound::WriteWAVLooped(const std::string& path, double seconds)
         }
     }
     else {
-        output.resize(target_samples, 0);
+    	const size_t copy_samples =
+			std::min(target_samples, samples.size());
+
+    	output.insert(
+			output.end(),
+			samples.begin(),
+			samples.begin() + copy_samples
+		);
+
+    	output.resize(target_samples, 0);
     }
 
     if (output.size() > target_samples)
