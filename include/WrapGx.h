@@ -75,6 +75,8 @@ GXFifoObj * 	GX_Init (void *base, u32 size);
 
 u32 	GX_GetTexBufferSize (u16 wd, u16 ht, u32 fmt, u8 mipmap, u8 maxlod);
 
+void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3]);
+
 void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, u8 fmt, u16 entries);
 void 	GX_LoadTlut (GXTlutObj *obj, u32 tlut_name);
 void 	GX_InitTexObjTlut (GXTexObj *obj, u32 tlut_name);
@@ -93,7 +95,8 @@ void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel);
 void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a);
 
 void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
-	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a);
+	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a,
+	u8 ind_tex_map, u8 ind_tex_coord, u8 ind_scale_s, u8 ind_scale_t);
 
 void 	GX_SetTevKAlphaSel (u8 tevstage, u8 sel);
 void 	GX_SetTevKColorSel (u8 tevstage, u8 sel);

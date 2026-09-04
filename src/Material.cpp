@@ -177,17 +177,19 @@ void Material::Load(std::istream& file)
 	// ind stage
 	for (u32 i = 0; i != flags.ind_stage; ++i)
 	{
-		// TODO: store these
-		u8 tex_coord, tex_map, scale_s, scale_t;
+		IndStage stage{};
 
-		file >> BE >> tex_coord >> tex_map >> scale_s, scale_t;
+		file >> BE >> stage.tex_coord >> stage.tex_map >> stage.scale_s >> stage.scale_t;
 
 		file.ignore(1);
 
-		std::cout << "ind_texture: " << name << "tex_coord: " << (int)tex_coord
-			<< " tex_map: " << (int)tex_map << '\n';
+		std::cout << "IndStage [" << (int)i << "]: "
+			<< "tex_coord: " << (int)stage.tex_coord
+			<< " tex_map: " << (int)stage.tex_map
+			<< " scale_s: " << (int)stage.scale_s
+			<< " scale_t: " << (int)stage.scale_t << '\n';
 
-		std::cout << "Ind Stages not yet supported !!\n";
+		ind_stages.push_back(stage);
 	}
 
 	// tev stage
@@ -199,10 +201,8 @@ void Material::Load(std::istream& file)
 
 		tev_stages.push_back(ts);
 	}
-	if (!flags.tev_stage)
+	if ( !flags.tev_stage)
 	{
-		// set up defaults, this seems dumb/wrong
-
 		TevStage tev{};
 		memset(tev.data, 0, sizeof(tev.data));
 
@@ -390,8 +390,35 @@ void Material::Apply(const Resources& resources) const
 	// bind textures
 	ApplyTextures(resources);
 
+	static const float kIdentityOffset[2][3] = {
+		{ 1.f, 0.f, 0.f },
+		{ 0.f, 1.f, 0.f },
+	};
+
+	// reset all 3 slots first — don't let a previous material's matrix leak through
+	for (unsigned int slot = 0; slot != 3; ++slot)
+		GX_SetIndTexMtx(slot, kIdentityOffset);
+
+	unsigned int i = 0;
+	for (auto& srt : ind_srts)
+	{
+		if (i >= 3) break;
+
+		const float rad = srt.rotate * (3.14159265f / 180.f);
+		const float c = std::cos(rad), s = std::sin(rad);
+
+		const float offset[2][3] = {
+			{ srt.scale_s * c, -srt.scale_s * s, srt.translate_s },
+			{ srt.scale_t * s,  srt.scale_t * c, srt.translate_t },
+		};
+
+		GX_SetIndTexMtx(i, offset);
+		++i;
+	}
+
 	// tev stages
 	{
+
 	for (unsigned int i = 0; i != 4; ++i)
 		GX_SetTevSwapModeTable(i, tev_swap_table[i].r, tev_swap_table[i].g,
 			tev_swap_table[i].b, tev_swap_table[i].a);
@@ -410,8 +437,19 @@ void Material::Apply(const Resources& resources) const
 		GX_SetTevAlphaOp(i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
 		GX_SetTevKAlphaSel(i, ts.alpha_in.constant_sel);
 
+		u8 ind_tex_map = 0, ind_tex_coord = 0, ind_scale_s = 0, ind_scale_t = 0;
+		if (ts.ind.mtx != 0 && ts.ind.tex_id < ind_stages.size())
+		{
+			const auto& stage = ind_stages[ts.ind.tex_id];
+			ind_tex_map   = stage.tex_map;
+			ind_tex_coord = stage.tex_coord;
+			ind_scale_s   = stage.scale_s;
+			ind_scale_t   = stage.scale_t;
+		}
+
 		GX_SetTevIndirect(i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
-			ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha);
+			ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha,
+			ind_tex_map, ind_tex_coord, ind_scale_s, ind_scale_t);
 
 		++i;
 	}
