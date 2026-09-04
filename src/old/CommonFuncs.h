@@ -84,20 +84,6 @@ inline u64 _rotr64(u64 x, unsigned int shift){
 	#define vscprintf _vscprintf
 char* strndup (char const *s, size_t n);
 
-// 64 bit offsets for windows
-#ifndef atoll
-	#define atoll _atoi64
-#endif
-#ifndef stat64
-	#define stat64 _stat64
-#endif
-#ifndef fstat64
-	#define fstat64 _fstat64
-#endif
-#ifndef fileno
-	#define fileno _fileno
-#endif
-
 	#if _M_IX86
 		#define Crash() {__asm int 3}
 	#else
