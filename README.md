@@ -1,6 +1,6 @@
 # wii-banner-renderer
 
-[![Build Windows Release](https://github.com/jacnils/wii-banner-renderer/actions/workflows/windows.yml/badge.svg)](https://github.com/jacnils/wii-banner-renderer/actions/workflows/windows.yml)
+[![Build Windows Release](https://github.com/ForwarderFactory/wii-banner-renderer/actions/workflows/windows.yml/badge.svg)](https://github.com/ForwarderFactory/wii-banner-renderer/actions/workflows/windows.yml)
 
 [Showcase](https://www.youtube.com/watch?v=_UVSLDDvSd0)
 [Web version](https://forwarderfactory.com/banner-renderer/)
