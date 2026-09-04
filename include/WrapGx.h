@@ -44,7 +44,7 @@ struct GXTexObj
 		memset(val, 0, sizeof(val));
 	};
 
-	u32 	val [8];
+	u32 	val [8]{};
 };
 
 struct GXTlutObj
@@ -54,7 +54,7 @@ struct GXTlutObj
 		memset(val, 0, sizeof(val));
 	};
 
-	u32 val[8];
+	u32 val[8]{};
 };
 
 struct GXColor
@@ -94,9 +94,17 @@ void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color);
 void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel);
 void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a);
 
+void GX_SetIndTexMatrix(u8 mtx_index,
+	float translate_s, float translate_t,
+	float scale_s, float scale_t,
+	float rotate_degrees);
+
+void GX_SetIndTexOrder(u8 indstage, u8 texcoord, u8 texmap);
+void GX_SetIndTexCoordScale(u8 indstage, u8 scale_s, u8 scale_t);
+
+void GX_SetNumIndStages(u8 count);
 void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
-	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a,
-	u8 ind_tex_map, u8 ind_tex_coord, u8 ind_scale_s, u8 ind_scale_t);
+	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a);
 
 void 	GX_SetTevKAlphaSel (u8 tevstage, u8 sel);
 void 	GX_SetTevKColorSel (u8 tevstage, u8 sel);

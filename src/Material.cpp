@@ -23,6 +23,8 @@ distribution.
 
 #include <GL/glew.h>
 
+#include <cmath>
+
 #include "Material.h"
 #include "Endian.h"
 #include "Funcs.h"
@@ -162,12 +164,12 @@ void Material::Load(std::istream& file)
 			>> srt.scale_x
 			>> srt.scale_y;
 
-		std::cout << "IndSrt: "
-		  << srt.translate_x << ", "
-		  << srt.translate_y << ", "
-		  << srt.scale_x << ", "
-		  << srt.scale_y << ", "
-		  << srt.rotate << '\n';
+		std::cout << "IndSrt:\n"
+		  << "\ttranslate_x: " << srt.translate_x << ", "
+		  << "\ttranslate_y: " << srt.translate_y << ", "
+		  << "\trotate: " << srt.rotate << '\n'
+		  << "\tscale_x: " << srt.scale_x << ", "
+		  << "\tscale_y: " << srt.scale_y << ", \n";
 
 		ind_srts.push_back(srt);
 
@@ -515,40 +517,51 @@ void Material::Apply(const Resources& resources) const
 		GX_SetTevSwapModeTable(_i, tev_swap_table[_i].r, tev_swap_table[_i].g,
 			tev_swap_table[_i].b, tev_swap_table[_i].a);
 
-	int _i = 0;
-	for (auto& ts : tev_stages)
+	// Configure indirect texture stages.
+	for (unsigned int i = 0; i < ind_stages.size() && i < 4; ++i)
 	{
-		GX_SetTevOrder(_i, ts.tex_coord, ts.tex_map, ts.color);
-		GX_SetTevSwapMode(_i, ts.ras_sel, ts.tex_sel);
+		const auto& stage = ind_stages[i];
 
-		GX_SetTevColorIn(_i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
-		GX_SetTevColorOp(_i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
-		GX_SetTevKColorSel(_i, ts.color_in.constant_sel);
+		GX_SetIndTexOrder(
+			i,
+			stage.tex_coord,
+			stage.tex_map
+		);
 
-		GX_SetTevAlphaIn(_i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
-		GX_SetTevAlphaOp(_i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
-		GX_SetTevKAlphaSel(_i, ts.alpha_in.constant_sel);
+		GX_SetIndTexCoordScale(
+			i,
+			stage.scale_s,
+			stage.scale_t
+		);
+	}
 
-		u8 ind_tex_map = 0, ind_tex_coord = 0, ind_scale_s = 0, ind_scale_t = 0;
-		if (ts.ind.mtx != 0 && ts.ind.tex_id < ind_stages.size())
+		int _i = 0;
+		for (auto& ts : tev_stages)
 		{
-			const auto& stage = ind_stages[ts.ind.tex_id];
-			ind_tex_map   = stage.tex_map;
-			ind_tex_coord = stage.tex_coord;
-			ind_scale_s   = stage.scale_s;
-			ind_scale_t   = stage.scale_t;
+			GX_SetTevOrder(_i, ts.tex_coord, ts.tex_map, ts.color);
+			GX_SetTevSwapMode(_i, ts.ras_sel, ts.tex_sel);
+
+			GX_SetTevColorIn(_i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
+			GX_SetTevColorOp(_i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
+			GX_SetTevKColorSel(_i, ts.color_in.constant_sel);
+
+			GX_SetTevAlphaIn(_i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
+			GX_SetTevAlphaOp(_i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
+			GX_SetTevKAlphaSel(_i, ts.alpha_in.constant_sel);
+
+			GX_SetTevIndirect(_i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
+				ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha);
+
+			++_i;
 		}
 
-		GX_SetTevIndirect(_i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
-			ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha,
-			ind_tex_map, ind_tex_coord, ind_scale_s, ind_scale_t);
-
-		++_i;
+		// enable correct number of tev stages
+		GX_SetNumTevStages(_i);
 	}
 
-	// enable correct number of tev stages
-	GX_SetNumTevStages(_i);
-	}
+	GX_SetNumIndStages(
+		std::min<size_t>(ind_stages.size(), 4)
+	);
 
 	// currently this will do nothing because of vertex_colors
 	glColor4ubv(&color.r);
