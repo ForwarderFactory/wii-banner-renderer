@@ -156,17 +156,17 @@ void Material::Load(std::istream& file)
 		IndSrt srt{};
 
 		file >> BE
-			>> srt.translate_s
-			>> srt.translate_t
-			>> srt.scale_s
-			>> srt.scale_t
-			>> srt.rotate;
+			>> srt.translate_x
+			>> srt.translate_y
+			>> srt.rotate
+			>> srt.scale_x
+			>> srt.scale_y;
 
 		std::cout << "IndSrt: "
-		  << srt.translate_s << ", "
-		  << srt.translate_t << ", "
-		  << srt.scale_s << ", "
-		  << srt.scale_t << ", "
+		  << srt.translate_x << ", "
+		  << srt.translate_y << ", "
+		  << srt.scale_x << ", "
+		  << srt.scale_y << ", "
 		  << srt.rotate << '\n';
 
 		ind_srts.push_back(srt);
@@ -360,20 +360,23 @@ void Material::Apply(const Resources& resources) const
 		glActiveTexture(GL_TEXTURE0 + i);
 		glLoadIdentity();
 
-		// TODO: not using "tgen_type", "tgen_src"
-
 		const u8 mtrx = (tcg.mtrx_src - 30) / 3;
-
-		if (mtrx < texture_srts.size())
+		if (tcg.tgen_type == 1 && mtrx < texture_srts.size())
 		{
 			const auto& srt = texture_srts[mtrx];
 
-			glTranslatef(0.5f, 0.5f, 0.f);
-			glRotatef(srt.rotate, 0.f, 0.f, 1.f);
+			const float rad = srt.rotate * (3.14159265f / 180.f);
+			const float c = cosf(rad), s = sinf(rad);
 
-			glScalef(srt.scale.x, srt.scale.y, 1.f);
-
-			glTranslatef(srt.translate.x / srt.scale.x - 0.5f, srt.translate.y / srt.scale.y -0.5f, 0.f);
+			float m[16] = {
+				srt.scale.x * c,  srt.scale.x * s, 0.f, 0.f,
+				srt.scale.y * -s, srt.scale.y * c, 0.f, 0.f,
+				0.f, 0.f, 1.f, 0.f,
+				-0.5f * (srt.scale.x * c + srt.scale.y * -s) + srt.translate.x + 0.5f,
+				-0.5f * (srt.scale.x * s + srt.scale.y * c)  + srt.translate.y + 0.5f,
+				0.f, 1.f
+			};
+			glLoadMatrixf(m); // column-major — double check element order against your GL calling convention
 		}
 
 		++i;
@@ -397,45 +400,134 @@ void Material::Apply(const Resources& resources) const
 
 	// reset all 3 slots first — don't let a previous material's matrix leak through
 	for (unsigned int slot = 0; slot != 3; ++slot)
-		GX_SetIndTexMtx(slot, kIdentityOffset);
+		GX_SetIndTexMtx(slot, kIdentityOffset, 0);
 
 	unsigned int i = 0;
+
 	for (auto& srt : ind_srts)
 	{
-		if (i >= 3) break;
+		if (i >= 3)
+			break;
 
 		const float rad = srt.rotate * (3.14159265f / 180.f);
-		const float c = std::cos(rad), s = std::sin(rad);
+		const float c = std::cos(rad);
+		const float s = std::sin(rad);
 
-		const float offset[2][3] = {
-			{ srt.scale_s * c, -srt.scale_s * s, srt.translate_s },
-			{ srt.scale_t * s,  srt.scale_t * c, srt.translate_t },
+		float offset[2][3] = {
+			{
+				srt.scale_x * c,
+				srt.scale_y * -s,
+				srt.translate_x
+			},
+			{
+				srt.scale_x * s,
+				srt.scale_y * c,
+				srt.translate_y
+			}
 		};
 
-		GX_SetIndTexMtx(i, offset);
+		float abs_mtx[2][3];
+
+		for (int y = 0; y < 2; ++y)
+			for (int x = 0; x < 3; ++x)
+				abs_mtx[y][x] = std::abs(offset[y][x]);
+
+		int scale_exp = 0;
+
+		// GX indirect matrices need to be normalized.
+		if (abs_mtx[0][0] >= 1.0f ||
+			abs_mtx[0][1] >= 1.0f ||
+			abs_mtx[0][2] >= 1.0f ||
+			abs_mtx[1][0] >= 1.0f ||
+			abs_mtx[1][1] >= 1.0f ||
+			abs_mtx[1][2] >= 1.0f)
+		{
+			while (scale_exp < 0x2e)
+			{
+				bool too_large = false;
+
+				for (auto & y : offset)
+				{
+					for (float x : y)
+					{
+						if (std::abs(x) >= 1.0f)
+						{
+							too_large = true;
+							break;
+						}
+					}
+
+					if (too_large)
+						break;
+				}
+
+				if (!too_large)
+					break;
+
+				for (auto & y : offset)
+					for (float & x : y)
+						x *= 0.5f;
+
+				++scale_exp;
+			}
+		}
+		else
+		{
+			while (scale_exp > -0x11)
+			{
+				bool all_small = true;
+
+				for (auto & y : offset)
+				{
+					for (float x : y)
+					{
+						if (std::abs(x) >= 0.5f)
+						{
+							all_small = false;
+							break;
+						}
+					}
+
+					if (!all_small)
+						break;
+				}
+
+				if (!all_small)
+					break;
+
+				for (auto & y : offset)
+					for (float & x : y)
+						x *= 2.0f;
+
+				--scale_exp;
+			}
+		}
+
+		GX_SetIndTexMtx(i, offset, scale_exp);
+
 		++i;
 	}
 
 	// tev stages
 	{
 
-	for (unsigned int i = 0; i != 4; ++i)
-		GX_SetTevSwapModeTable(i, tev_swap_table[i].r, tev_swap_table[i].g,
-			tev_swap_table[i].b, tev_swap_table[i].a);
+	for (unsigned int _i = 0; _i != 4; ++_i)
+		GX_SetTevSwapModeTable(_i, tev_swap_table[_i].r, tev_swap_table[_i].g,
+			tev_swap_table[_i].b, tev_swap_table[_i].a);
 
-	int i = 0;
+	int _i = 0;
 	for (auto& ts : tev_stages)
 	{
-		GX_SetTevOrder(i, ts.tex_coord, ts.tex_map, ts.color);
-		GX_SetTevSwapMode(i, ts.ras_sel, ts.tex_sel);
+		GX_SetTevOrder(_i, ts.tex_coord, ts.tex_map, ts.color);
+		GX_SetTevSwapMode(_i, ts.ras_sel, ts.tex_sel);
 
-		GX_SetTevColorIn(i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
-		GX_SetTevColorOp(i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
-		GX_SetTevKColorSel(i, ts.color_in.constant_sel);
+		GX_SetTevColorIn(_i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
+		GX_SetTevColorOp(_i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
+		GX_SetTevKColorSel(_i, ts.color_in.constant_sel);
 
-		GX_SetTevAlphaIn(i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
-		GX_SetTevAlphaOp(i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
-		GX_SetTevKAlphaSel(i, ts.alpha_in.constant_sel);
+		GX_SetTevAlphaIn(_i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
+		GX_SetTevAlphaOp(_i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
+		GX_SetTevKAlphaSel(_i, ts.alpha_in.constant_sel);
 
 		u8 ind_tex_map = 0, ind_tex_coord = 0, ind_scale_s = 0, ind_scale_t = 0;
 		if (ts.ind.mtx != 0 && ts.ind.tex_id < ind_stages.size())
@@ -447,15 +539,15 @@ void Material::Apply(const Resources& resources) const
 			ind_scale_t   = stage.scale_t;
 		}
 
-		GX_SetTevIndirect(i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
+		GX_SetTevIndirect(_i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
 			ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha,
 			ind_tex_map, ind_tex_coord, ind_scale_s, ind_scale_t);
 
-		++i;
+		++_i;
 	}
 
 	// enable correct number of tev stages
-	GX_SetNumTevStages(i);
+	GX_SetNumTevStages(_i);
 	}
 
 	// currently this will do nothing because of vertex_colors
@@ -491,7 +583,7 @@ void Material::ProcessHermiteKey(const KeyType& type, float value)
 	{
 		if (type.target < 5 && type.index < flags.ind_srt) //&& type.index < ind_srts.size())
 		{
-			(&ind_srts[type.index].translate_s)[type.target] = value;
+			(&ind_srts[type.index].translate_x)[type.target] = value;
 			return;
 		}
 		return;	// TODO: remove this return

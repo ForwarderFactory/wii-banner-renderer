@@ -75,7 +75,7 @@ GXFifoObj * 	GX_Init (void *base, u32 size);
 
 u32 	GX_GetTexBufferSize (u16 wd, u16 ht, u32 fmt, u8 mipmap, u8 maxlod);
 
-void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3]);
+void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3], int scale_exp);
 
 void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, u8 fmt, u16 entries);
 void 	GX_LoadTlut (GXTlutObj *obj, u32 tlut_name);

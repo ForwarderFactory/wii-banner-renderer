@@ -359,14 +359,23 @@ void 	GX_SetAlphaCompare (u8 comp0, u8 ref0, u8 aop, u8 comp1, u8 ref1)
 	//glLogicOp();	// TODO: need to do this guy, but for alpha
 }
 
-static float g_ind_tex_matrix[3][6]{};
+struct IndTexMatrix
+{
+	float m[6]{};
+	int scale_exp{};
+};
 
-void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3])
+static IndTexMatrix g_ind_tex_matrix[3]{};
+
+void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3], int scale_exp)
 {
 	if (mtx_index >= 3)
 		return;
 
-	memcpy(g_ind_tex_matrix[mtx_index], offset, sizeof(g_ind_tex_matrix[mtx_index]));
+	memcpy(g_ind_tex_matrix[mtx_index].m, offset,
+		   sizeof(g_ind_tex_matrix[mtx_index].m));
+
+	g_ind_tex_matrix[mtx_index].scale_exp = scale_exp;
 }
 
 struct IndStageProps
@@ -471,28 +480,67 @@ std::map<TevStages, CompiledTevStages> g_compiled_tev_stages;
 
 TevStages g_active_stages;
 
-void GX_SetIndTexMatrix(u8 mtx_index, float translate_s, float translate_t,
-	float scale_s, float scale_t, float rotate_degrees)
+void GX_SetIndTexMatrix(u8 mtx_index,
+	float translate_s, float translate_t,
+	float scale_s, float scale_t,
+	float rotate_degrees)
 {
 	if (mtx_index >= 3)
 		return;
 
 	const float rad = rotate_degrees * (3.14159265f / 180.f);
-	const float c = std::cos(rad), s = std::sin(rad);
+	const float c = std::cos(rad);
+	const float s = std::sin(rad);
 
-	float* m = g_ind_tex_matrix[mtx_index];
-	m[0] = scale_s * c;  m[1] = -scale_s * s;  m[2] = translate_s;
-	m[3] = scale_t * s;  m[4] =  scale_t * c;  m[5] = translate_t;
+	float* m = g_ind_tex_matrix[mtx_index].m;
+
+	m[0] = scale_s * c;
+	m[1] = -scale_s * s;
+	m[2] = translate_s;
+
+	m[3] = scale_t * s;
+	m[4] = scale_t * c;
+	m[5] = translate_t;
+
+	g_ind_tex_matrix[mtx_index].scale_exp = 0;
 }
 
 void CompiledTevStages::Enable()
 {
 	glUseProgram(program);
 
-	glUniform4fv(glGetUniformLocation(program, "registers"), 3, g_color_registers[0]);
-	glUniform4fv(glGetUniformLocation(program, "kcolors"), 4, g_kcolor_registers[0]);
+	glUniform4fv(
+		glGetUniformLocation(program, "registers"),
+		3,
+		g_color_registers[0]);
 
-	glUniform3fv(glGetUniformLocation(program, "indmtx"), 6, &g_ind_tex_matrix[0][0]);
+	glUniform4fv(
+		glGetUniformLocation(program, "kcolors"),
+		4,
+		g_kcolor_registers[0]);
+
+	float matrices[18];
+
+	for (int i = 0; i < 3; ++i)
+		std::memcpy(
+			&matrices[i * 6],
+			g_ind_tex_matrix[i].m,
+			sizeof(g_ind_tex_matrix[i].m));
+
+	glUniform3fv(
+		glGetUniformLocation(program, "indmtx"),
+		6,
+		matrices);
+
+	int scale_exp[3];
+
+	for (int i = 0; i < 3; ++i)
+		scale_exp[i] = g_ind_tex_matrix[i].scale_exp;
+
+	glUniform1iv(
+		glGetUniformLocation(program, "indmtx_scale"),
+		3,
+		scale_exp);
 }
 
 void CompiledTevStages::Compile(const TevStages& stages)
@@ -600,21 +648,18 @@ void CompiledTevStages::Compile(const TevStages& stages)
 		if (stage.ind_mtx >= 1 && stage.ind_mtx <= 3)
 		{
 			frag_ss << "ind_texcoord = texture2D(textures" << (int)stage.ind_tex_map
-				<< ", gl_TexCoord[" << (int)stage.ind_tex_coord << "].xy).rg;";
+				<< ", gl_TexCoord[" << (int)stage.ind_tex_coord << "].xy / vec2("
+				<< scale_divisors[stage.ind_scale_s] << ".0, " << scale_divisors[stage.ind_scale_t] << ".0)).rg;";
 
 			// bias: raw texel is 0..1 (was 0..255 on HW); un-signed formats are centered at 0.5
 			if (stage.ind_bias != 0)
 				frag_ss << "ind_texcoord -= vec2(0.5);";
 
-			// per-stage UV scale (GX_ITS_* exponent)
-			frag_ss << "ind_texcoord /= vec2("
-				<< scale_divisors[stage.ind_scale_s] << ".0, "
-				<< scale_divisors[stage.ind_scale_t] << ".0);";
+			const int mtx = (int)stage.ind_mtx - 1;
 
-			// apply the indirect matrix (2x3, from uniform array)
 			frag_ss << "ind_texcoord = vec2("
-				<< "dot(indmtx[" << (int)(stage.ind_mtx * 2 + 0) << "], vec3(ind_texcoord, 1.0)),"
-				<< "dot(indmtx[" << (int)(stage.ind_mtx * 2 + 1) << "], vec3(ind_texcoord, 1.0)));";
+					<< "dot(indmtx[" << (mtx * 2 + 0) << "], vec3(ind_texcoord, 1.0)),"
+					<< "dot(indmtx[" << (mtx * 2 + 1) << "], vec3(ind_texcoord, 1.0)));";
 		}
 
 		// current texture color
