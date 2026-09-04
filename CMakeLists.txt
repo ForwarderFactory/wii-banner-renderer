@@ -97,7 +97,7 @@ if (WIN32)
         message(WARNING "OpenSSL DLLs not found in ${MINGW_PREFIX_WIN}/bin")
     endif()
 endif()
-if (UNIX)
+if (UNIX AND NOT APPLE)
     find_library(EGL_LIBRARY NAMES EGL REQUIRED)
 
     find_package(GLEW REQUIRED)
@@ -109,6 +109,21 @@ if (UNIX)
             OpenSSL::SSL
             OpenSSL::Crypto
 	    GLEW::GLEW
+    )
+endif()
+if (UNIX AND APPLE)
+    find_package(GLEW REQUIRED)
+    find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
+
+    target_link_libraries(wii-banner-renderer
+        PRIVATE
+            OpenGL::GL
+            OpenSSL::SSL
+            OpenSSL::Crypto
+            GLEW::GLEW
+            ${COREFOUNDATION_FRAMEWORK}
+            ${IOKIT_FRAMEWORK}
     )
 endif()
 

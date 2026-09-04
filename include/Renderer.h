@@ -37,6 +37,14 @@ public:
 private:
     void CreateContext();
     void DestroyContext();
+#if defined(__APPLE__)
+    void CreateFramebuffer();
+    void DestroyFramebuffer();
+
+    GLuint m_framebuffer = 0;
+    GLuint m_depth_buffer = 0;
+    GLuint m_color_texture = 0;
+#endif
 
     int m_width;
     int m_height;

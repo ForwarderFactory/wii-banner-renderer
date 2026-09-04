@@ -33,6 +33,7 @@ distribution.
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <sstream>
 
 #include "Banner.h"
 #include "Renderer.h"

@@ -26,7 +26,7 @@ distribution.
 #include <windows.h>
 #endif
 #include <GL/glew.h>
-#include <GL/glu.h>
+//#include <GL/glu.h>
 
 #include <iostream>
 #include <map>
@@ -442,8 +442,8 @@ void CompiledTevStages::Compile(const TevStages& stages)
 	static const unsigned int sampler_count = 8;
 
 	// generate vertex/fragment shader code
-	{
 	std::ostringstream vert_ss;
+	{
 
 	vert_ss << "void main(){";
 
@@ -471,8 +471,8 @@ void CompiledTevStages::Compile(const TevStages& stages)
 	glCompileShader(vertex_shader);
 
 	// generate fragment shader code
-	{
 	std::ostringstream frag_ss;
+	{
 
 	// uniforms
 	for (unsigned int i = 0; i != sampler_count; ++i)
@@ -733,11 +733,14 @@ void CompiledTevStages::Compile(const TevStages& stages)
 	glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &vert_compiled);
 	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &frag_compiled);
 
-	if (!vert_compiled)
+	if (!vert_compiled) {
 		std::cout << "Failed to compile vertex shader\n";
+		std::cout << vert_ss.str() << "\n";
+	}
 
 	if (!frag_compiled)
 		std::cout << "Failed to compile fragment shader\n";
+		std::cout << frag_ss.str() << "\n";
 	}
 
 	// create program, attach shaders

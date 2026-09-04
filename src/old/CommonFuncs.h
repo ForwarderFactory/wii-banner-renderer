@@ -18,6 +18,8 @@
 #ifndef _COMMONFUNCS_H_
 #define _COMMONFUNCS_H_
 
+#include <stddef.h>
+
 #include "CommonTypes.h"
 
 #ifdef _WIN32
@@ -39,8 +41,8 @@ template<> struct CompileTimeAssert<true> {};
 #ifdef __linux__
 #include <byteswap.h>
 #else
-char * strndup(char const *s, size_t n);
-size_t strnlen(const char *s, size_t n);
+//char * strndup(char const *s, size_t n);
+//size_t strnlen(const char *s, size_t n);
 #endif
 
 // go to debugger mode
@@ -80,7 +82,7 @@ inline u64 _rotr64(u64 x, unsigned int shift){
 	#define unlink _unlink
 	#define snprintf _snprintf
 	#define vscprintf _vscprintf
-char* strndup (char const *s, size_t n);	
+char* strndup (char const *s, size_t n);
 
 // 64 bit offsets for windows
 #ifndef atoll
