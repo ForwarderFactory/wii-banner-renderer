@@ -290,29 +290,83 @@ void Layout::AdvanceFrame()
 
 void Layout::SetLanguage(const std::string& language)
 {
-	// TODO: i'd like an empty language to unhide everything, maybe
+	bool found_language_group = false;
+	auto root_group = groups.find("RootGroup");
 
 	// hide panes of non-matching languages
-	for (auto& group : groups["RootGroup"].groups)
+	if (root_group != groups.end())
 	{
-		// some hax, there are some odd "Rso0" "Rso1" groups that shouldn't be hidden
-		// only the 3 character language groups should be
-		if (group.first != language && group.first.length() == 3)
+		for (auto& group : root_group->second.groups)
 		{
-			for (auto& pane : group.second.panes)
+			if (group.first == language)
+				found_language_group = true;
+
+			// some hax, there are some odd "Rso0" "Rso1" groups that shouldn't be hidden
+			// only the 3 character language groups should be
+			if (group.first != language && group.first.length() == 3)
 			{
-				if (Pane* const found = FindPane(pane))
-					found->SetHide(true);
+				for (auto& pane : group.second.panes)
+				{
+					if (Pane* const found = FindPane(pane))
+						found->SetHide(true);
+				}
 			}
 		}
 	}
 
 	// unhide panes of matching language, some banners list language specific panes in multiple language groups
-	for (auto& pane : groups["RootGroup"].groups[language].panes)
+	if (found_language_group)
 	{
-		Pane* const found = FindPane(pane);
-		if (found)
-			found->SetHide(false);
+		for (auto& pane : root_group->second.groups.at(language).panes)
+		{
+			Pane* const found = FindPane(pane);
+			if (found)
+			{
+				found->SetHide(false);
+				found->SetVisible(true);
+			}
+		}
+		return;
+	}
+
+	// Some system banners use hidden font_<language> panes instead of
+	// three-letter language groups. Only use this convention when multiple
+	// known language panes are present, so an unrelated pane named font_e is
+	// not treated as a language selector.
+	static const std::map<std::string, std::string> legacy_language_panes = {
+		{"JPN", "font_j"},
+		{"ENG", "font_e"},
+		{"GER", "font_g"},
+		{"FRA", "font_f"},
+		{"SPA", "font_s"},
+		{"ITA", "font_i"},
+		{"DUT", "font_n"},
+	};
+
+	const auto selected_language = legacy_language_panes.find(language);
+	if (selected_language == legacy_language_panes.end())
+		return;
+
+	unsigned int pane_count = 0;
+	for (const auto& language_pane : legacy_language_panes)
+	{
+		const std::string& pane_name = language_pane.second;
+		if (FindPane(pane_name))
+			++pane_count;
+	}
+	if (pane_count < 2)
+		return;
+
+	for (const auto& language_pane : legacy_language_panes)
+	{
+		const std::string& pane_name = language_pane.second;
+		if (Pane* const pane = FindPane(pane_name))
+		{
+			const bool selected = pane_name == selected_language->second;
+			pane->SetHide(!selected);
+			if (selected)
+				pane->SetVisible(true);
+		}
 	}
 }
 
