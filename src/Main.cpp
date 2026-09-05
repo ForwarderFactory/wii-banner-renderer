@@ -53,6 +53,7 @@ struct Settings {
 	bool icon = false; // icon, self explanatory
 	double resolution_multiplier = 1; // resolution multiplier
 	bool webm = false; // output to webm
+	std::filesystem::path font_archive; // Wii shared font content archive
 
 	void print_settings() const {
 		std::cout << "FPS: " << fps << "\n";
@@ -64,6 +65,8 @@ struct Settings {
 		std::cout << "No audio: " << no_audio << "\n";
 		std::cout << "No crop: " << no_crop << "\n";
 		std::cout << "Resolution multiplier: " << resolution_multiplier << "\n";
+		std::cout << "Font archive: "
+			<< (font_archive.empty() ? "auto" : font_archive.string()) << "\n";
 	}
 };
 
@@ -221,7 +224,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 
     Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
 
-    WiiBanner::Banner banner(opening.string());
+    WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
 
 	if (settings.icon) {
 		banner.LoadIcon();
@@ -394,7 +397,8 @@ int main(int argc, char** argv) {
     	std::cout << "-s/--save <int>:                    Save frames as images. Optional integer following it will be the limit, otherwise all frames will be saved.\n";
     	std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
     	std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
-    	std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
+		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
+		std::cout << "-font/--font-archive <path>:        Wii shared font archive containing wbf1.brfna and wbf2.brfna.\n";
     	std::cout << "-webm/--webm:                       Output in .webm format (VP9)\n";
     	std::cout << "\n";
     	std::cout << "Files are output in the working directory and bear the name of the input file (with a different file extension) by default.\n";
@@ -436,6 +440,18 @@ int main(int argc, char** argv) {
 			settings.icon = true;
 		} else if (arg == "-webm" || arg == "--webm") {
 			settings.webm = true;
+		} else if (arg == "-font" || arg == "--font-archive") {
+			if (i + 1 >= argc) {
+				std::cerr << arg << " requires a path\n";
+				return EXIT_FAILURE;
+			}
+
+			settings.font_archive = argv[++i];
+			if (!std::filesystem::is_regular_file(settings.font_archive)) {
+				std::cerr << "Font archive does not exist or cannot be read: "
+					<< settings.font_archive << "\n";
+				return EXIT_FAILURE;
+			}
 		} else if (arg == "-s" || arg == "--save") {
 			settings.save_frames = true;
 

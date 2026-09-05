@@ -23,6 +23,8 @@ distribution.
 */
 
 #include <fstream>
+#include <cstdlib>
+#include <vector>
 
 #include <GL/glew.h>
 
@@ -74,10 +76,11 @@ enum BinaryMagic : u32
 		return true;
 	}
 
-Banner::Banner(const std::string& _filename)
+Banner::Banner(const std::string& _filename, const std::string& _font_archive)
 	: layout_banner(nullptr)
 	, layout_icon(nullptr)
 	, filename(_filename)
+	, font_archive(_font_archive)
 {
 	std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
 
@@ -236,24 +239,68 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
 	for (auto* tex : layout->resources.textures)
 		std::cout << "  " << tex->GetName() << "\n";
 
-	// load fonts
+	// Load banner-local fonts first, then fall back to the Wii shared font
+	// archive for the two system fonts used by channel banners.
+	for (Font* font : layout->resources.fonts)
 	{
-		// this guy is in "User/Wii/shared1"
-		std::ifstream font_file("00000003.app", std::ios::binary | std::ios::in);
-		DiscIO::CARCFile font_arc(font_file);
-
-		for (Font* font : layout->resources.fonts)
+		const auto embedded_font_offset =
+			bin_arc.GetFileOffset("arc/font/" + font->GetName());
+		if (embedded_font_offset)
 		{
-			auto const font_offset = font_arc.GetFileOffset(font->GetName());
-
-			if (font_offset)
+			file.clear();
+			file.seekg(embedded_font_offset, std::ios::beg);
+			if (font->Load(file))
 			{
-				font_file.seekg(font_offset, std::ios::beg);
-				font->Load(font_file);
-
-				//std::cout << "font name: " << font->name << '\n';
+				std::cout << "Loaded font: " << font->GetName()
+					<< " (banner)\n";
+				continue;
 			}
 		}
+
+		std::string archive_name = font->GetName();
+		if (archive_name == "RevoIpl_RodinNTLGPro_DB_32_I4.brfnt")
+			archive_name = "wbf1.brfna";
+		else if (archive_name == "RevoIpl_UtrilloProGrecoStd_M_32_I4.brfnt")
+			archive_name = "wbf2.brfna";
+
+		std::vector<std::string> archive_candidates;
+		if (!font_archive.empty())
+		{
+			archive_candidates.push_back(font_archive);
+		}
+		else if (const char* environment_archive = std::getenv("WII_FONT_ARCHIVE"))
+		{
+			archive_candidates.emplace_back(environment_archive);
+		}
+		else
+		{
+			archive_candidates.emplace_back("00000003.app");
+			archive_candidates.emplace_back("00000011.app");
+		}
+
+		for (const std::string& archive_path : archive_candidates)
+		{
+			std::ifstream font_file(archive_path, std::ios::binary | std::ios::in);
+			if (!font_file)
+				continue;
+
+			DiscIO::CARCFile font_arc(font_file);
+			const auto font_offset = font_arc.GetFileOffset(archive_name);
+			if (!font_offset)
+				continue;
+
+			font_file.clear();
+			font_file.seekg(font_offset, std::ios::beg);
+			if (font->Load(font_file))
+			{
+				std::cout << "Loaded font: " << font->GetName()
+					<< " (" << archive_path << ")\n";
+				break;
+			}
+		}
+
+		if (!font->IsLoaded())
+			std::cerr << "Unable to load font: " << font->GetName() << '\n';
 	}
 
 	layout->SetLoopStart(length_start);

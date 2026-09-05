@@ -33,7 +33,7 @@ namespace WiiBanner
 class Banner
 {
 public:
-	Banner(const std::string& filename);
+	Banner(const std::string& filename, const std::string& font_archive = {});
 	~Banner();
 
 	[[nodiscard]] Layout* GetBanner() const { return layout_banner; }
@@ -66,6 +66,7 @@ private:
 	Sound* sound = nullptr;
 
 	const std::string filename;
+	const std::string font_archive;
 };
 
 }
