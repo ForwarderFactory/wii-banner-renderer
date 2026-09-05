@@ -44,7 +44,7 @@ struct GXTexObj
 		memset(val, 0, sizeof(val));
 	};
 
-	u32 	val [8]{};
+	u32 	val [8];
 };
 
 struct GXTlutObj
@@ -54,7 +54,7 @@ struct GXTlutObj
 		memset(val, 0, sizeof(val));
 	};
 
-	u32 val[8]{};
+	u32 val[8];
 };
 
 struct GXColor
@@ -75,8 +75,6 @@ GXFifoObj * 	GX_Init (void *base, u32 size);
 
 u32 	GX_GetTexBufferSize (u16 wd, u16 ht, u32 fmt, u8 mipmap, u8 maxlod);
 
-void GX_SetIndTexMtx(u8 mtx_index, const float offset[2][3], int scale_exp);
-
 void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, u8 fmt, u16 entries);
 void 	GX_LoadTlut (GXTlutObj *obj, u32 tlut_name);
 void 	GX_InitTexObjTlut (GXTexObj *obj, u32 tlut_name);
@@ -94,15 +92,6 @@ void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color);
 void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel);
 void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a);
 
-void GX_SetIndTexMatrix(u8 mtx_index,
-	float translate_s, float translate_t,
-	float scale_s, float scale_t,
-	float rotate_degrees);
-
-void GX_SetIndTexOrder(u8 indstage, u8 texcoord, u8 texmap);
-void GX_SetIndTexCoordScale(u8 indstage, u8 scale_s, u8 scale_t);
-
-void GX_SetNumIndStages(u8 count);
 void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
 	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a);
 

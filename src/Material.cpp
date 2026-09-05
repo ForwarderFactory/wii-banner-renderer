@@ -23,8 +23,6 @@ distribution.
 
 #include <GL/glew.h>
 
-#include <cmath>
-
 #include "Material.h"
 #include "Endian.h"
 #include "Funcs.h"
@@ -158,18 +156,18 @@ void Material::Load(std::istream& file)
 		IndSrt srt{};
 
 		file >> BE
-			>> srt.translate_x
-			>> srt.translate_y
-			>> srt.rotate
-			>> srt.scale_x
-			>> srt.scale_y;
+			>> srt.translate_s
+			>> srt.translate_t
+			>> srt.scale_s
+			>> srt.scale_t
+			>> srt.rotate;
 
-		std::cout << "IndSrt:\n"
-		  << "\ttranslate_x: " << srt.translate_x << ", "
-		  << "\ttranslate_y: " << srt.translate_y << ", "
-		  << "\trotate: " << srt.rotate << '\n'
-		  << "\tscale_x: " << srt.scale_x << ", "
-		  << "\tscale_y: " << srt.scale_y << ", \n";
+		std::cout << "IndSrt: "
+		  << srt.translate_s << ", "
+		  << srt.translate_t << ", "
+		  << srt.scale_s << ", "
+		  << srt.scale_t << ", "
+		  << srt.rotate << '\n';
 
 		ind_srts.push_back(srt);
 
@@ -179,19 +177,17 @@ void Material::Load(std::istream& file)
 	// ind stage
 	for (u32 i = 0; i != flags.ind_stage; ++i)
 	{
-		IndStage stage{};
+		// TODO: store these
+		u8 tex_coord, tex_map, scale_s, scale_t;
 
-		file >> BE >> stage.tex_coord >> stage.tex_map >> stage.scale_s >> stage.scale_t;
+		file >> BE >> tex_coord >> tex_map >> scale_s, scale_t;
 
 		file.ignore(1);
 
-		std::cout << "IndStage [" << (int)i << "]: "
-			<< "tex_coord: " << (int)stage.tex_coord
-			<< " tex_map: " << (int)stage.tex_map
-			<< " scale_s: " << (int)stage.scale_s
-			<< " scale_t: " << (int)stage.scale_t << '\n';
+		std::cout << "ind_texture: " << name << "tex_coord: " << (int)tex_coord
+			<< " tex_map: " << (int)tex_map << '\n';
 
-		ind_stages.push_back(stage);
+		std::cout << "Ind Stages not yet supported !!\n";
 	}
 
 	// tev stage
@@ -203,8 +199,10 @@ void Material::Load(std::istream& file)
 
 		tev_stages.push_back(ts);
 	}
-	if ( !flags.tev_stage)
+	if (!flags.tev_stage)
 	{
+		// set up defaults, this seems dumb/wrong
+
 		TevStage tev{};
 		memset(tev.data, 0, sizeof(tev.data));
 
@@ -362,23 +360,20 @@ void Material::Apply(const Resources& resources) const
 		glActiveTexture(GL_TEXTURE0 + i);
 		glLoadIdentity();
 
+		// TODO: not using "tgen_type", "tgen_src"
+
 		const u8 mtrx = (tcg.mtrx_src - 30) / 3;
-		if (tcg.tgen_type == 1 && mtrx < texture_srts.size())
+
+		if (mtrx < texture_srts.size())
 		{
 			const auto& srt = texture_srts[mtrx];
 
-			const float rad = srt.rotate * (3.14159265f / 180.f);
-			const float c = cosf(rad), s = sinf(rad);
+			glTranslatef(0.5f, 0.5f, 0.f);
+			glRotatef(srt.rotate, 0.f, 0.f, 1.f);
 
-			float m[16] = {
-				srt.scale.x * c,  srt.scale.x * s, 0.f, 0.f,
-				srt.scale.y * -s, srt.scale.y * c, 0.f, 0.f,
-				0.f, 0.f, 1.f, 0.f,
-				-0.5f * (srt.scale.x * c + srt.scale.y * -s) + srt.translate.x + 0.5f,
-				-0.5f * (srt.scale.x * s + srt.scale.y * c)  + srt.translate.y + 0.5f,
-				0.f, 1.f
-			};
-			glLoadMatrixf(m); // column-major — double check element order against your GL calling convention
+			glScalef(srt.scale.x, srt.scale.y, 1.f);
+
+			glTranslatef(srt.translate.x / srt.scale.x - 0.5f, srt.translate.y / srt.scale.y -0.5f, 0.f);
 		}
 
 		++i;
@@ -395,173 +390,35 @@ void Material::Apply(const Resources& resources) const
 	// bind textures
 	ApplyTextures(resources);
 
-	static const float kIdentityOffset[2][3] = {
-		{ 1.f, 0.f, 0.f },
-		{ 0.f, 1.f, 0.f },
-	};
-
-	// reset all 3 slots first — don't let a previous material's matrix leak through
-	for (unsigned int slot = 0; slot != 3; ++slot)
-		GX_SetIndTexMtx(slot, kIdentityOffset, 0);
-
-	unsigned int i = 0;
-
-	for (auto& srt : ind_srts)
+	// tev stages
 	{
-		if (i >= 3)
-			break;
+	for (unsigned int i = 0; i != 4; ++i)
+		GX_SetTevSwapModeTable(i, tev_swap_table[i].r, tev_swap_table[i].g,
+			tev_swap_table[i].b, tev_swap_table[i].a);
 
-		const float rad = srt.rotate * (3.14159265f / 180.f);
-		const float c = std::cos(rad);
-		const float s = std::sin(rad);
+	int i = 0;
+	for (auto& ts : tev_stages)
+	{
+		GX_SetTevOrder(i, ts.tex_coord, ts.tex_map, ts.color);
+		GX_SetTevSwapMode(i, ts.ras_sel, ts.tex_sel);
 
-		float offset[2][3] = {
-			{
-				srt.scale_x * c,
-				srt.scale_y * -s,
-				srt.translate_x
-			},
-			{
-				srt.scale_x * s,
-				srt.scale_y * c,
-				srt.translate_y
-			}
-		};
+		GX_SetTevColorIn(i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
+		GX_SetTevColorOp(i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
+		GX_SetTevKColorSel(i, ts.color_in.constant_sel);
 
-		float abs_mtx[2][3];
+		GX_SetTevAlphaIn(i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
+		GX_SetTevAlphaOp(i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
+		GX_SetTevKAlphaSel(i, ts.alpha_in.constant_sel);
 
-		for (int y = 0; y < 2; ++y)
-			for (int x = 0; x < 3; ++x)
-				abs_mtx[y][x] = std::abs(offset[y][x]);
-
-		int scale_exp = 0;
-
-		// GX indirect matrices need to be normalized.
-		if (abs_mtx[0][0] >= 1.0f ||
-			abs_mtx[0][1] >= 1.0f ||
-			abs_mtx[0][2] >= 1.0f ||
-			abs_mtx[1][0] >= 1.0f ||
-			abs_mtx[1][1] >= 1.0f ||
-			abs_mtx[1][2] >= 1.0f)
-		{
-			while (scale_exp < 0x2e)
-			{
-				bool too_large = false;
-
-				for (auto & y : offset)
-				{
-					for (float x : y)
-					{
-						if (std::abs(x) >= 1.0f)
-						{
-							too_large = true;
-							break;
-						}
-					}
-
-					if (too_large)
-						break;
-				}
-
-				if (!too_large)
-					break;
-
-				for (auto & y : offset)
-					for (float & x : y)
-						x *= 0.5f;
-
-				++scale_exp;
-			}
-		}
-		else
-		{
-			while (scale_exp > -0x11)
-			{
-				bool all_small = true;
-
-				for (auto & y : offset)
-				{
-					for (float x : y)
-					{
-						if (std::abs(x) >= 0.5f)
-						{
-							all_small = false;
-							break;
-						}
-					}
-
-					if (!all_small)
-						break;
-				}
-
-				if (!all_small)
-					break;
-
-				for (auto & y : offset)
-					for (float & x : y)
-						x *= 2.0f;
-
-				--scale_exp;
-			}
-		}
-
-		GX_SetIndTexMtx(i, offset, scale_exp);
+		GX_SetTevIndirect(i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
+			ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha);
 
 		++i;
 	}
 
-	// tev stages
-	{
-
-	for (unsigned int _i = 0; _i != 4; ++_i)
-		GX_SetTevSwapModeTable(_i, tev_swap_table[_i].r, tev_swap_table[_i].g,
-			tev_swap_table[_i].b, tev_swap_table[_i].a);
-
-	// Configure indirect texture stages.
-	for (unsigned int i = 0; i < ind_stages.size() && i < 4; ++i)
-	{
-		const auto& stage = ind_stages[i];
-
-		GX_SetIndTexOrder(
-			i,
-			stage.tex_coord,
-			stage.tex_map
-		);
-
-		GX_SetIndTexCoordScale(
-			i,
-			stage.scale_s,
-			stage.scale_t
-		);
+	// enable correct number of tev stages
+	GX_SetNumTevStages(i);
 	}
-
-		int _i = 0;
-		for (auto& ts : tev_stages)
-		{
-			GX_SetTevOrder(_i, ts.tex_coord, ts.tex_map, ts.color);
-			GX_SetTevSwapMode(_i, ts.ras_sel, ts.tex_sel);
-
-			GX_SetTevColorIn(_i, ts.color_in.a, ts.color_in.b, ts.color_in.c, ts.color_in.d);
-			GX_SetTevColorOp(_i, ts.color_in.op, ts.color_in.bias, ts.color_in.scale, ts.color_in.clamp, ts.color_in.reg_id);
-			GX_SetTevKColorSel(_i, ts.color_in.constant_sel);
-
-			GX_SetTevAlphaIn(_i, ts.alpha_in.a, ts.alpha_in.b, ts.alpha_in.c, ts.alpha_in.d);
-			GX_SetTevAlphaOp(_i, ts.alpha_in.op, ts.alpha_in.bias, ts.alpha_in.scale, ts.alpha_in.clamp, ts.alpha_in.reg_id);
-			GX_SetTevKAlphaSel(_i, ts.alpha_in.constant_sel);
-
-			GX_SetTevIndirect(_i, ts.ind.tex_id, ts.ind.format, ts.ind.bias, ts.ind.mtx,
-				ts.ind.wrap_s, ts.ind.wrap_t, ts.ind.add_prev, ts.ind.utc_lod, ts.ind.alpha);
-
-			++_i;
-		}
-
-		// enable correct number of tev stages
-		GX_SetNumTevStages(_i);
-	}
-
-	GX_SetNumIndStages(
-		std::min<size_t>(ind_stages.size(), 4)
-	);
 
 	// currently this will do nothing because of vertex_colors
 	glColor4ubv(&color.r);
@@ -596,7 +453,7 @@ void Material::ProcessHermiteKey(const KeyType& type, float value)
 	{
 		if (type.target < 5 && type.index < flags.ind_srt) //&& type.index < ind_srts.size())
 		{
-			(&ind_srts[type.index].translate_x)[type.target] = value;
+			(&ind_srts[type.index].translate_s)[type.target] = value;
 			return;
 		}
 		return;	// TODO: remove this return
