@@ -71,14 +71,6 @@ target_link_libraries(wb PUBLIC ${WOLFSSL_TARGET})
 message(STATUS "WolfSSL built")
 
 if (WIN32)
-    if (MINGW)
-        target_link_options(wb PRIVATE
-                -static
-                -static-libgcc
-                -static-libstdc++
-        )
-    endif()
-
     include(FetchContent)
 
     FetchContent_Declare(
@@ -172,6 +164,13 @@ install(
 
 add_executable(wbr
         src/cli/Main.cpp
+)
+
+
+target_link_options(wb PRIVATE
+        -static
+        -static-libgcc
+        -static-libstdc++
 )
 
 target_link_libraries(wbr
