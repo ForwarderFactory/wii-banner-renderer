@@ -79,8 +79,6 @@ if (WIN32)
             GIT_TAG master
     )
 
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-
     set(glew-cmake_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(glew-cmake_BUILD_STATIC ON CACHE BOOL "" FORCE)
 
@@ -166,11 +164,10 @@ add_executable(wbr
         src/cli/Main.cpp
 )
 
-
-target_link_options(wb PRIVATE
-        -static
+target_link_options(wbr PRIVATE
         -static-libgcc
         -static-libstdc++
+        -static
 )
 
 target_link_libraries(wbr
