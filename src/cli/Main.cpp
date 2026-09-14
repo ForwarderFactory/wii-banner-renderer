@@ -58,6 +58,7 @@ struct Settings {
 	bool icon = false; // icon, self explanatory
 	double resolution_multiplier = 1; // resolution multiplier
 	bool webm = false; // output to webm
+	bool sound_only = false; // sound only
 	std::filesystem::path font_archive; // Wii shared font content archive
 
 	void print_settings() const {
@@ -70,6 +71,7 @@ struct Settings {
 		std::cout << "No audio: " << no_audio << "\n";
 		std::cout << "No crop: " << no_crop << "\n";
 		std::cout << "Resolution multiplier: " << resolution_multiplier << "\n";
+		std::cout << "Sound only: " << sound_only << "\n";
 		std::cout << "Font archive: "
 			<< (font_archive.empty() ? "auto" : font_archive.string()) << "\n";
 	}
@@ -200,9 +202,23 @@ int process(const Render& input_opening, Settings settings = {}) {
 		}
 	}
 
-    Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+	if (settings.sound_only) {
+		WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+		banner.LoadSound();
+		if (banner.GetSound()) {
+			banner.GetSound()->WriteWAV(base_filename + ".wav");
+			std::cerr << "Extracted audio\n";
+		} else {
+			std::cerr << "Failed to extract audio, exiting...\n";
+			return EXIT_FAILURE;
+		}
 
-    WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+		return EXIT_SUCCESS;
+	}
+
+  Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+
+  WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
 
 	if (settings.icon) {
 		banner.LoadIcon();
@@ -297,7 +313,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 		{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}
 	}};
 
-	Rect crop{};
+	Rect crop;
 
 	if (settings.no_crop)
 	{
@@ -381,6 +397,7 @@ int main(int argc, char** argv) {
     	std::cout << "-nc/--no-crop:                      Do not crop to the Wii's visible area. Only recommended for debugging.\n";
     	std::cout << "-i/--icon:                          Output the channel's icon, instead of banner.\n";
     	std::cout << "-s/--save <int>:                    Save frames as images. Optional integer following it will be the limit, otherwise all frames will be saved.\n";
+    	std::cout << "-so/--sound-only:                   Save audio only, don't process banner/icon.\n";
     	std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
     	std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
 		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
@@ -422,6 +439,8 @@ int main(int argc, char** argv) {
 		} else if (arg == "-nc" || arg == "--no-crop") {
 			// no crop
 			settings.no_crop = true;
+		} else if (arg == "-so" || arg == "--sound-only") {
+			settings.sound_only = true;
 		} else if (arg == "-i" || arg == "--icon") {
 			settings.icon = true;
 		} else if (arg == "-webm" || arg == "--webm") {
