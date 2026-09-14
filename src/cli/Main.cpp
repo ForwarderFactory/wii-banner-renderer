@@ -134,46 +134,6 @@ private:
 
 };
 
-struct Point {
-	double x;
-	double y;
-};
-
-struct CropPoints {
-	int width;
-	int height;
-	int x;
-	int y;
-};
-
-constexpr CropPoints GetCrop(const std::array<Point, 4>& pts) {
-	double min_x = pts[0].x;
-	double max_x = pts[0].x;
-	double min_y = pts[0].y;
-	double max_y = pts[0].y;
-
-	for (const auto& p : pts) {
-		min_x = std::min(min_x, p.x);
-		max_x = std::max(max_x, p.x);
-		min_y = std::min(min_y, p.y);
-		max_y = std::max(max_y, p.y);
-	}
-
-	return {
-		static_cast<int>(max_x - min_x),
-		static_cast<int>(max_y - min_y),
-		static_cast<int>(min_x),
-		static_cast<int>(min_y)
-	};
-}
-
-constexpr std::string ToFFmpegCrop(const CropPoints& c) {
-	return "crop=" + std::to_string(c.width) + ":" +
-					 std::to_string(c.height) + ":" +
-					 std::to_string(c.x) + ":" +
-					 std::to_string(c.y);
-}
-
 int process(const Render& input_opening, Settings settings = {}) {
 	std::filesystem::path opening = input_opening.input;
 
@@ -292,27 +252,6 @@ int process(const Render& input_opening, Settings settings = {}) {
 		audio_param = "-i " "\"" + base_filename + ".wav" + "\"" " ";
 	}
 
-	std::string crop;
-	if (!settings.no_crop) {
-		std::array<Point, 4> points = {{
-			{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top left
-			{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom left
-		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top right
-			{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom right
-		}};
-
-		std::array<Point, 4> points_icon = {{
-			{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}, // bottom left
-			{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
-			{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier} // bottom right
-		}};
-
-		crop = "-vf \"";
-		crop += ToFFmpegCrop(settings.icon ? GetCrop(points_icon) : GetCrop(points));
-		crop += ",scale=trunc(iw/2)*2:trunc(ih/2)*2\" ";
-	}
-
 	std::string output_format;
 
 	if (settings.webm)
@@ -344,18 +283,47 @@ int process(const Render& input_opening, Settings settings = {}) {
 			"\"" + base_filename + "\"";
 	}
 
+	std::array<Point, 4> points = {{
+		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
+		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
+		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
+		{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
+	}};
+
+	std::array<Point, 4> points_icon = {{
+		{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
+		{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier},
+		{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
+		{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}
+	}};
+
+	Rect crop{};
+
+	if (settings.no_crop)
+	{
+		crop = {
+			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
+			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier),
+			0,
+			0
+		};
+	}
+	else
+	{
+		crop = GetCrop(settings.icon ? points_icon : points);
+	}
 
 	ProcPtr ffmpeg{
 		"ffmpeg -y "
 		"-f rawvideo "
 		"-loglevel error "
 		"-pixel_format rgba "
-		"-video_size " + std::to_string(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier)) + "x" +
-			std::to_string(static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier)) + " "
+		"-video_size " + std::to_string(crop.width) + "x" +
+		      std::to_string(crop.height) + " "
 		"-framerate " + std::to_string(settings.fps) + " "
 		"-i - " + audio_param +
 		"-map 0:v:0" + (!audio_param.empty() ? " -map 1:a:0 " : " ") +
-		"-t " + std::to_string(runtime) + " " + crop +
+		"-t " + std::to_string(runtime) + " " +
 		output_format,
 		"w"
 	};
@@ -372,7 +340,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 			renderer.SavePNG(filename, static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
   		}
 
-  		renderer.ReadPixelsTo(ffmpeg.get());
+  		renderer.ReadPixelsTo(ffmpeg.get(), crop);
     	layout->AdvanceFrame();
     }
 
