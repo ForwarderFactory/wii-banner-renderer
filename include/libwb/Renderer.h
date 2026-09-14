@@ -60,6 +60,10 @@ public:
     void ReadPixelsTo(FILE* output);
     void ReadPixelsTo(FILE *output, Rect crop) const;
 
+    unsigned char *GetFrameData();
+
+    std::vector<unsigned char> GetFrameData(Rect crop) const;
+
     [[nodiscard]] const uint8_t* Pixels() const
     {
         return m_pixels.data();

@@ -47,6 +47,15 @@ target_include_directories(wb
 )
 
 find_package(OpenGL REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(FFMPEG REQUIRED
+        libavformat
+        libavcodec
+        libavutil
+        libswscale
+        libswresample
+)
 
 include(FetchContent)
 
@@ -162,17 +171,15 @@ install(
 
 add_executable(wbr
         src/cli/Main.cpp
+        src/cli/VideoEncoder.cpp
 )
 
-target_link_options(wbr PRIVATE
-        -static-libgcc
-        -static-libstdc++
-        -static
-)
+target_include_directories(wbr PRIVATE include/cli)
 
 target_link_libraries(wbr
         PRIVATE
         wb::wb
+        ${FFMPEG_LIBRARIES}
 )
 
 install(

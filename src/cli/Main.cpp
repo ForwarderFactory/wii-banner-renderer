@@ -21,6 +21,7 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source
 distribution.
 */
+#include "VideoEncoder.h"
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
 #include <windows.h>
 #include <cstdlib>
@@ -89,52 +90,6 @@ int get_proc() {
 	return getpid();
 #endif
 }
-
-// wrapper for opening processes
-struct ProcPtr {
-	ProcPtr(const std::string& params, const std::string& mode = "w", bool print = true) {
-		ptr =
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-		_popen(params.c_str(), mode.c_str());
-#else
-			popen(params.c_str(), mode.c_str());
-#endif
-
-		if (!ptr) {
-			throw std::runtime_error{"failed to popen()"};
-		}
-
-		std::cout << "Command: " << params << "\n";
-
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-		_setmode(_fileno(ptr), _O_BINARY);
-#endif
-
-	}
-	void close() {
-		if (ptr)
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-			_pclose(ptr);
-#else
-			pclose(ptr);
-#endif
-		ptr = nullptr;
-	}
-	~ProcPtr() {
-		close();
-	}
-
-	[[nodiscard]] FILE* get() const {
-		if (!ptr) {
-			throw std::runtime_error{"uninitialized"};
-		}
-		return ptr;
-	}
-
-private:
-	FILE* ptr{nullptr};
-
-};
 
 int process(const Render& input_opening, Settings settings = {}) {
 	std::filesystem::path opening = input_opening.input;
@@ -263,42 +218,6 @@ int process(const Render& input_opening, Settings settings = {}) {
 		);
 	}
 
-	std::string audio_param;
-	if (!settings.no_audio) {
-		audio_param = "-i " "\"" + base_filename + ".wav" + "\"" " ";
-	}
-
-	std::string output_format;
-
-	if (settings.webm)
-	{
-		output_format =
-			"-c:v libvpx-vp9 "
-			"-pix_fmt yuv420p "
-			"-b:v 0 "
-			"-crf 30 "
-			"-g " + std::to_string(settings.fps) + " "
-			"-c:a libopus "
-		    "-cluster_time_limit 1000 "
-			"-f webm "
-			"-shortest "
-			"\"" + base_filename + "\"";
-	}
-	else
-	{
-		output_format =
-			"-c:v libx264 "
-			"-pix_fmt yuv420p "
-			"-movflags +faststart "
-			"-profile:v baseline "
-			"-level 3.0 "
-			"-g " + std::to_string(settings.fps) + " "
-			"-c:a aac "
-			"-f mp4 "
-			"-shortest "
-			"\"" + base_filename + "\"";
-	}
-
 	std::array<Point, 4> points = {{
 		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
 		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
@@ -315,8 +234,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	Rect crop;
 
-	if (settings.no_crop)
-	{
+	if (settings.no_crop) {
 		crop = {
 			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
 			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier),
@@ -329,20 +247,13 @@ int process(const Render& input_opening, Settings settings = {}) {
 		crop = GetCrop(settings.icon ? points_icon : points);
 	}
 
-	ProcPtr ffmpeg{
-		"ffmpeg -y "
-		"-f rawvideo "
-		"-loglevel error "
-		"-pixel_format rgba "
-		"-video_size " + std::to_string(crop.width) + "x" +
-		      std::to_string(crop.height) + " "
-		"-framerate " + std::to_string(settings.fps) + " "
-		"-i - " + audio_param +
-		"-map 0:v:0" + (!audio_param.empty() ? " -map 1:a:0 " : " ") +
-		"-t " + std::to_string(runtime) + " " +
-		output_format,
-		"w"
-	};
+	VideoEncoder::OutputFormat output_format = settings.webm ?
+	VideoEncoder::OutputFormat::WEBM :
+	VideoEncoder::OutputFormat::MP4;
+
+	auto audio_file = base_filename + ".wav";
+
+	VideoEncoder encoder(base_filename, crop.width, crop.height, settings.fps, audio_file, output_format);
 
     for (int i = 0; i < settings.fps * runtime; i++) {
     	renderer.BeginFrame();
@@ -356,11 +267,12 @@ int process(const Render& input_opening, Settings settings = {}) {
 			renderer.SavePNG(filename, static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
   		}
 
-  		renderer.ReadPixelsTo(ffmpeg.get(), crop);
+    	encoder.writeVideoFrame(renderer.GetFrameData(crop).data());
+
     	layout->AdvanceFrame();
     }
 
-	ffmpeg.close();
+	encoder.finish();
 
     banner.UnloadBanner();
 

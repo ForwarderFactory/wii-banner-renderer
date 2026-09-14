@@ -1,4 +1,7 @@
 #include "../include/libwb/Renderer.h"
+
+#include <memory>
+
 #include "../include/libwb/WrapGx.h"
 #if defined(__APPLE__)
 #include <GL/glew.h>
@@ -524,4 +527,40 @@ void Renderer::ReadPixelsTo(FILE* output, Rect crop) const
             output
         );
     }
+}
+
+unsigned char* Renderer::GetFrameData() {
+    return m_pixels.data();
+}
+
+std::vector<unsigned char> Renderer::GetFrameData(Rect crop) const
+{
+    constexpr size_t channels = 4;
+
+    const size_t row_size =
+        static_cast<size_t>(crop.width) * channels;
+
+    std::vector<unsigned char> result(
+        row_size * static_cast<size_t>(crop.height)
+    );
+
+    for (int y = 0; y < crop.height; ++y)
+    {
+        const int src_y = crop.y + y;
+
+        const size_t src_offset =
+            (static_cast<size_t>(src_y) * m_width +
+             static_cast<size_t>(crop.x)) * channels;
+
+        const size_t dst_offset =
+            static_cast<size_t>(y) * row_size;
+
+        std::memcpy(
+            result.data() + dst_offset,
+            m_pixels.data() + src_offset,
+            row_size
+        );
+    }
+
+    return result;
 }
