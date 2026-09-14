@@ -58,6 +58,7 @@ struct Settings {
 	bool icon = false; // icon, self explanatory
 	double resolution_multiplier = 1; // resolution multiplier
 	bool webm = false; // output to webm
+	bool sound_only = false; // sound only
 	std::filesystem::path font_archive; // Wii shared font content archive
 
 	void print_settings() const {
@@ -70,6 +71,7 @@ struct Settings {
 		std::cout << "No audio: " << no_audio << "\n";
 		std::cout << "No crop: " << no_crop << "\n";
 		std::cout << "Resolution multiplier: " << resolution_multiplier << "\n";
+		std::cout << "Sound only: " << sound_only << "\n";
 		std::cout << "Font archive: "
 			<< (font_archive.empty() ? "auto" : font_archive.string()) << "\n";
 	}
@@ -133,46 +135,6 @@ private:
 	FILE* ptr{nullptr};
 
 };
-
-struct Point {
-	double x;
-	double y;
-};
-
-struct CropPoints {
-	int width;
-	int height;
-	int x;
-	int y;
-};
-
-constexpr CropPoints GetCrop(const std::array<Point, 4>& pts) {
-	double min_x = pts[0].x;
-	double max_x = pts[0].x;
-	double min_y = pts[0].y;
-	double max_y = pts[0].y;
-
-	for (const auto& p : pts) {
-		min_x = std::min(min_x, p.x);
-		max_x = std::max(max_x, p.x);
-		min_y = std::min(min_y, p.y);
-		max_y = std::max(max_y, p.y);
-	}
-
-	return {
-		static_cast<int>(max_x - min_x),
-		static_cast<int>(max_y - min_y),
-		static_cast<int>(min_x),
-		static_cast<int>(min_y)
-	};
-}
-
-constexpr std::string ToFFmpegCrop(const CropPoints& c) {
-	return "crop=" + std::to_string(c.width) + ":" +
-					 std::to_string(c.height) + ":" +
-					 std::to_string(c.x) + ":" +
-					 std::to_string(c.y);
-}
 
 int process(const Render& input_opening, Settings settings = {}) {
 	std::filesystem::path opening = input_opening.input;
@@ -240,6 +202,20 @@ int process(const Render& input_opening, Settings settings = {}) {
 		}
 	}
 
+	if (settings.sound_only) {
+		WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+		banner.LoadSound();
+		if (banner.GetSound()) {
+			banner.GetSound()->WriteWAV(base_filename + ".wav");
+			std::cerr << "Extracted audio\n";
+		} else {
+			std::cerr << "Failed to extract audio, exiting...\n";
+			return EXIT_FAILURE;
+		}
+
+		return EXIT_SUCCESS;
+	}
+
     Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
 
     WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
@@ -292,27 +268,6 @@ int process(const Render& input_opening, Settings settings = {}) {
 		audio_param = "-i " "\"" + base_filename + ".wav" + "\"" " ";
 	}
 
-	std::string crop;
-	if (!settings.no_crop) {
-		std::array<Point, 4> points = {{
-			{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top left
-			{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom left
-		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier}, // top right
-			{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}, // bottom right
-		}};
-
-		std::array<Point, 4> points_icon = {{
-			{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top left
-			{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}, // bottom left
-			{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier}, // top right
-			{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier} // bottom right
-		}};
-
-		crop = "-vf \"";
-		crop += ToFFmpegCrop(settings.icon ? GetCrop(points_icon) : GetCrop(points));
-		crop += ",scale=trunc(iw/2)*2:trunc(ih/2)*2\" ";
-	}
-
 	std::string output_format;
 
 	if (settings.webm)
@@ -344,18 +299,47 @@ int process(const Render& input_opening, Settings settings = {}) {
 			"\"" + base_filename + "\"";
 	}
 
+	std::array<Point, 4> points = {{
+		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
+		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
+		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
+		{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
+	}};
+
+	std::array<Point, 4> points_icon = {{
+		{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
+		{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier},
+		{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
+		{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}
+	}};
+
+	Rect crop;
+
+	if (settings.no_crop)
+	{
+		crop = {
+			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
+			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier),
+			0,
+			0
+		};
+	}
+	else
+	{
+		crop = GetCrop(settings.icon ? points_icon : points);
+	}
 
 	ProcPtr ffmpeg{
 		"ffmpeg -y "
 		"-f rawvideo "
 		"-loglevel error "
 		"-pixel_format rgba "
-		"-video_size " + std::to_string(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier)) + "x" +
-			std::to_string(static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier)) + " "
+		"-video_size " + std::to_string(crop.width) + "x" +
+		      std::to_string(crop.height) + " "
 		"-framerate " + std::to_string(settings.fps) + " "
 		"-i - " + audio_param +
 		"-map 0:v:0" + (!audio_param.empty() ? " -map 1:a:0 " : " ") +
-		"-t " + std::to_string(runtime) + " " + crop +
+		"-t " + std::to_string(runtime) + " " +
 		output_format,
 		"w"
 	};
@@ -372,7 +356,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 			renderer.SavePNG(filename, static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
   		}
 
-  		renderer.ReadPixelsTo(ffmpeg.get());
+  		renderer.ReadPixelsTo(ffmpeg.get(), crop);
     	layout->AdvanceFrame();
     }
 
@@ -413,6 +397,7 @@ int main(int argc, char** argv) {
     	std::cout << "-nc/--no-crop:                      Do not crop to the Wii's visible area. Only recommended for debugging.\n";
     	std::cout << "-i/--icon:                          Output the channel's icon, instead of banner.\n";
     	std::cout << "-s/--save <int>:                    Save frames as images. Optional integer following it will be the limit, otherwise all frames will be saved.\n";
+    	std::cout << "-so/--sound-only:                   Save audio only, don't process banner/icon.\n";
     	std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
     	std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
 		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
@@ -454,6 +439,8 @@ int main(int argc, char** argv) {
 		} else if (arg == "-nc" || arg == "--no-crop") {
 			// no crop
 			settings.no_crop = true;
+		} else if (arg == "-so" || arg == "--sound-only") {
+			settings.sound_only = true;
 		} else if (arg == "-i" || arg == "--icon") {
 			settings.icon = true;
 		} else if (arg == "-webm" || arg == "--webm") {
