@@ -216,9 +216,9 @@ int process(const Render& input_opening, Settings settings = {}) {
 		return EXIT_SUCCESS;
 	}
 
-    Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+  Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
 
-    WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+  WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
 
 	if (settings.icon) {
 		banner.LoadIcon();

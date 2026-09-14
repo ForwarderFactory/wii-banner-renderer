@@ -487,8 +487,9 @@ bool Renderer::SavePNG(const std::string& path, int width, int height)
 }
 
 void Renderer::ReadPixelsTo(FILE* output) {
-    const int channels = 4;
-    const int rowSize = m_width * channels;
+    if (!output) {
+        throw std::runtime_error{"output FILE* is null"};
+    }
 
     fwrite(
         m_pixels.data(),
@@ -496,4 +497,31 @@ void Renderer::ReadPixelsTo(FILE* output) {
         m_pixels.size(),
         output
     );
+}
+
+void Renderer::ReadPixelsTo(FILE* output, Rect crop) const
+{
+    if (!output) {
+        throw std::runtime_error{"output FILE* is null"};
+    }
+
+    constexpr size_t channels = 4;
+    const size_t row_size =
+        static_cast<size_t>(crop.width) * channels;
+
+    for (int y = 0; y < crop.height; ++y)
+    {
+        const int src_y = crop.y + y;
+
+        const size_t offset =
+            (static_cast<size_t>(src_y) * m_width +
+             static_cast<size_t>(crop.x)) * channels;
+
+        fwrite(
+            m_pixels.data() + offset,
+            1,
+            row_size,
+            output
+        );
+    }
 }
