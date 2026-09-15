@@ -35,7 +35,7 @@ distribution.
 
 #include "Ash.h"
 #include "Yaz0.h"
-#include "lz77.h"
+#include "LZ77.h"
 
 namespace u8archive
 {
