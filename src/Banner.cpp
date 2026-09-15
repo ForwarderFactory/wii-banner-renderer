@@ -39,6 +39,7 @@ distribution.
 #include "../include/libwb/Sound.h"
 #include "../include/libwb/Endian.h"
 #include "../include/libwb/Types.h"
+#include <libwb/U8.h>
 
 namespace WiiBanner
 {
@@ -167,155 +168,158 @@ void Banner::LoadSound()
     }
 }
 
+std::string FirstPresent(const u8archive::Archive& arc,
+                         const std::vector<std::string>& paths)
+{
+   for (size_t i = 0; i != paths.size(); ++i)
+      if (arc.FindFile(paths[i]) >= 0)
+         return paths[i];
+
+   return std::string();
+}
+
 Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, Vec2f size)
 {
-	std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
+   std::ifstream bnr_file(filename.c_str(), std::ios::binary | std::ios::in);
+   if (!bnr_file)
+      return nullptr;
 
-	bnr_file.seekg(header_bytes + offset, std::ios::beg);
+   u8archive::Compression codec = u8archive::COMPRESSION_NONE;
+   u8archive::Archive bin_arc;
+   if (!bin_arc.OpenStream(bnr_file, header_bytes + offset, 0, &codec))
+   {
+      std::cerr << "Unable to open banner archive at offset " << offset << '\n';
+      return nullptr;
+   }
 
-	// LZ77 decompress .bin file
-	LZ77Decompressor decomp(bnr_file);
-	std::istream& file = decomp.GetStream();
+   std::cout << lyt_name << ".bin: " << u8archive::CompressionName(codec)
+             << ", " << bin_arc.Entries().size() << " entries\n";
 
-	DiscIO::CARCFile bin_arc(file);
-	const auto brlyt_offset = bin_arc.GetFileOffset("arc/blyt/" + lyt_name + ".brlyt");
+   std::vector<uint8_t> brlyt;
+   if (!bin_arc.ReadFile("arc/blyt/" + lyt_name + ".brlyt", brlyt))
+      return nullptr;
 
-	if (0 == brlyt_offset)
-		return nullptr;
+   auto* const layout = new Layout;
+   {
+      u8archive::MemoryStream in(brlyt);
+      layout->Load(in);
+   }
 
-	file.seekg(brlyt_offset, std::ios::beg);
-	auto* const layout = new Layout;
-	layout->Load(file);
+   layout->SetWidth(size.x);
+   layout->SetHeight(size.y);
 
-	// override size
-	layout->SetWidth(size.x);
-	layout->SetHeight(size.y);
+   FrameNumber length_start = 0, length_loop = 0;
 
-	// load animations
-	FrameNumber length_start = 0, length_loop = 0;
+   std::vector<std::string> start_names;
+   start_names.push_back("arc/anim/" + lyt_name + "_Start.brlan");
+   start_names.push_back("arc/anim/" + lyt_name + "_In.brlan");
 
-	auto brlan_start_offset = bin_arc.GetFileOffset("arc/anim/" + lyt_name + "_Start.brlan");
+   const std::string start_path = FirstPresent(bin_arc, start_names);
+   if (!start_path.empty())
+   {
+      std::vector<uint8_t> brlan;
+      if (bin_arc.ReadFile(start_path, brlan))
+      {
+         u8archive::MemoryStream in(brlan);
+         length_start = Animator::LoadAnimators(in, *layout, 0);
+      }
+   }
 
-	// alt. start file
-	if (!brlan_start_offset) {
-		brlan_start_offset =
-				bin_arc.GetFileOffset("arc/anim/" + lyt_name + "_In.brlan");
-	}
+   std::vector<std::string> loop_names;
+   loop_names.push_back("arc/anim/" + lyt_name + ".brlan");
+   loop_names.push_back("arc/anim/" + lyt_name + "_Loop.brlan");
+   loop_names.push_back("arc/anim/" + lyt_name + "_Rso0.brlan");
 
-	if (brlan_start_offset) {
-		file.seekg(brlan_start_offset, std::ios::beg);
-		length_start = Animator::LoadAnimators(file, *layout, 0);
-	}
+   const std::string loop_path = FirstPresent(bin_arc, loop_names);
+   if (!loop_path.empty()) {
+      std::vector<uint8_t> brlan;
+      if (bin_arc.ReadFile(loop_path, brlan)) {
+         u8archive::MemoryStream in(brlan);
+         length_loop = Animator::LoadAnimators(in, *layout, 1);
+      }
+   }
 
-	auto brlan_loop_offset = bin_arc.GetFileOffset("arc/anim/" + lyt_name + ".brlan");
-	if (!brlan_loop_offset) {
-		brlan_loop_offset = bin_arc.GetFileOffset("arc/anim/" + lyt_name + "_Loop.brlan");
-	}
-	if (!brlan_loop_offset) {
-		brlan_loop_offset = bin_arc.GetFileOffset("arc/anim/" + lyt_name + "_Rso0.brlan");
-	}
+   for (Texture* texture : layout->resources.textures) {
+      std::vector<uint8_t> tpl;
+      if (!bin_arc.ReadFile("arc/timg/" + texture->GetName(), tpl))
+      {
+         std::cerr << "Missing texture: " << texture->GetName() << '\n';
+         continue;
+      }
 
-	if (brlan_loop_offset) {
-		file.seekg(brlan_loop_offset, std::ios::beg);
-		length_loop = Animator::LoadAnimators(file, *layout, 1);
-	}
+      u8archive::MemoryStream in(tpl);
+      texture->Load(in);
+      std::cout << "Loaded texture: " << texture->GetName()
+                << " (" << tpl.size() << " bytes)\n";
+   }
 
-	// load textures
-	for (Texture* texture : layout->resources.textures) {
-		auto const texture_offset = bin_arc.GetFileOffset("arc/timg/" + texture->GetName());
-		std::cout << "Loading texture: "
-		  << texture->GetName()
-		  << " offset="
-		  << texture_offset
-		  << "\n";
-		if (texture_offset)
-		{
-			file.seekg(texture_offset, std::ios::beg);
-			texture->Load(file);
-		}
-	}
+   for (Font* font : layout->resources.fonts) {
+      std::vector<uint8_t> brfnt;
+      if (bin_arc.ReadFile("arc/font/" + font->GetName(), brfnt))
+      {
+         u8archive::MemoryStream in(brfnt);
+         if (font->Load(in))
+         {
+            std::cout << "Loaded font: " << font->GetName() << " (banner)\n";
+            continue;
+         }
+      }
 
-	std::cout << "textures:\n";
-	for (auto* tex : layout->resources.textures)
-		std::cout << "  " << tex->GetName() << "\n";
+      std::string archive_name = font->GetName();
+      if (archive_name == "RevoIpl_RodinNTLGPro_DB_32_I4.brfnt")
+         archive_name = "wbf1.brfna";
+      else if (archive_name == "RevoIpl_UtrilloProGrecoStd_M_32_I4.brfnt")
+         archive_name = "wbf2.brfna";
 
-	// Load banner-local fonts first, then fall back to the Wii shared font
-	// archive for the two system fonts used by channel banners.
-	for (Font* font : layout->resources.fonts)
-	{
-		const auto embedded_font_offset =
-			bin_arc.GetFileOffset("arc/font/" + font->GetName());
-		if (embedded_font_offset)
-		{
-			file.clear();
-			file.seekg(embedded_font_offset, std::ios::beg);
-			if (font->Load(file))
-			{
-				std::cout << "Loaded font: " << font->GetName()
-					<< " (banner)\n";
-				continue;
-			}
-		}
+      std::vector<std::string> archive_candidates;
+      if (!font_archive.empty())
+      {
+         archive_candidates.push_back(font_archive);
+      }
+      else if (const char* environment_archive = std::getenv("WII_FONT_ARCHIVE"))
+      {
+         archive_candidates.push_back(environment_archive);
+      }
+      else
+      {
+         archive_candidates.push_back("00000003.app");
+         archive_candidates.push_back("00000011.app");
+      }
 
-		std::string archive_name = font->GetName();
-		if (archive_name == "RevoIpl_RodinNTLGPro_DB_32_I4.brfnt")
-			archive_name = "wbf1.brfna";
-		else if (archive_name == "RevoIpl_UtrilloProGrecoStd_M_32_I4.brfnt")
-			archive_name = "wbf2.brfna";
+      for (const std::string& archive_path : archive_candidates) {
+         u8archive::Archive font_arc;
+         if (!font_arc.OpenFile(archive_path))
+            continue;
 
-		std::vector<std::string> archive_candidates;
-		if (!font_archive.empty())
-		{
-			archive_candidates.push_back(font_archive);
-		}
-		else if (const char* environment_archive = std::getenv("WII_FONT_ARCHIVE"))
-		{
-			archive_candidates.emplace_back(environment_archive);
-		}
-		else
-		{
-			archive_candidates.emplace_back("00000003.app");
-			archive_candidates.emplace_back("00000011.app");
-		}
+         std::vector<uint8_t> font_data;
+         if (!font_arc.ReadFile(archive_name, font_data))
+            continue;
 
-		for (const std::string& archive_path : archive_candidates)
-		{
-			std::ifstream font_file(archive_path, std::ios::binary | std::ios::in);
-			if (!font_file)
-				continue;
+         u8archive::MemoryStream in(font_data);
+         if (font->Load(in))
+         {
+            std::cout << "Loaded font: " << font->GetName()
+                      << " (" << archive_path << ")\n";
+            break;
+         }
+      }
 
-			DiscIO::CARCFile font_arc(font_file);
-			const auto font_offset = font_arc.GetFileOffset(archive_name);
-			if (!font_offset)
-				continue;
+      if (!font->IsLoaded())
+         std::cerr << "Unable to load font: " << font->GetName() << '\n';
+   }
 
-			font_file.clear();
-			font_file.seekg(font_offset, std::ios::beg);
-			if (font->Load(font_file))
-			{
-				std::cout << "Loaded font: " << font->GetName()
-					<< " (" << archive_path << ")\n";
-				break;
-			}
-		}
+   layout->SetLoopStart(length_start);
+   layout->SetLoopEnd(length_start + length_loop);
+   layout->SetFrame(0);
 
-		if (!font->IsLoaded())
-			std::cerr << "Unable to load font: " << font->GetName() << '\n';
-	}
-
-	layout->SetLoopStart(length_start);
-	layout->SetLoopEnd(length_start + length_loop);
-	// update everything for frame 0
-	layout->SetFrame(0);
-
-	return layout;
+   return layout;
 }
 
 Banner::~Banner()
 {
 	UnloadBanner();
 	UnloadIcon();
-	//UnloadSound();
+	UnloadSound();
 }
 
 }
