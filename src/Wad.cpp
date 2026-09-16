@@ -112,7 +112,7 @@ std::vector<TmdContent> parse_tmd_contents(const std::vector<u8>& tmd) {
     for (u16 i = 0; i < count; i++) {
         const u8* e = tmd.data() + offset + i * 36;
 
-        TmdContent c;
+        TmdContent c{};
         c.id    = be32(e + 0x00);
         c.index = (e[4] << 8) | e[5];
         c.type  = (e[6] << 8) | e[7];
@@ -211,6 +211,48 @@ void extract_contents_decrypted(const WadSections& s, const std::filesystem::pat
     }
 }
 
+void extract_contents_decrypted(
+    const WadSections& s,
+    std::vector<Wad::ExtractedFile>& files)
+{
+    auto contents = parse_tmd_contents(s.tmd);
+    auto title_key = get_title_key(s.tik);
+
+    size_t offset = 0;
+
+    for (const auto& c : contents) {
+        size_t padded = round_up(c.size, 0x40);
+
+        if (offset + padded > s.app.size())
+            throw std::runtime_error("Content exceeds app blob");
+
+        std::vector<u8> encrypted(
+            s.app.begin() + offset,
+            s.app.begin() + offset + padded
+        );
+
+        u8 content_index[16] = {};
+        content_index[0] = (c.index >> 8) & 0xFF;
+        content_index[1] = c.index & 0xFF;
+
+        auto decrypted = aes_cbc_decrypt(
+            encrypted,
+            title_key.data(),
+            content_index
+        );
+
+        // Remove AES/WAD padding.
+        decrypted.resize(c.size);
+
+        files.push_back({
+            std::format("{:08x}.app", c.id),
+            std::move(decrypted)
+        });
+
+        offset += padded;
+    }
+}
+
 void Wad::extract_wad(std::ifstream& in, const std::string& out_dir) {
     std::vector<u8> header(0x80);
 
@@ -255,4 +297,63 @@ void Wad::extract_wad(std::ifstream& in, const std::string& out_dir) {
 
     extract_contents_decrypted(s, outdir);
     std::cout << "Extracted: " << outdir << "\n";
+}
+
+std::vector<Wad::ExtractedFile> Wad::extract_wad(std::ifstream& in)
+{
+    std::vector<u8> header(0x80);
+
+    in.read(reinterpret_cast<char*>(header.data()), 0x40);
+    if (!in)
+        throw std::runtime_error("failed to read WAD header");
+
+    u32 header_len = be32(header.data());
+
+    if (header_len >= 0x80)
+        throw std::runtime_error("header too large");
+
+    if (header_len >= 0x40) {
+        in.read(reinterpret_cast<char*>(header.data() + 0x40), 0x40);
+
+        if (!in)
+            throw std::runtime_error("failed to read extended header");
+    }
+
+    u32 type = be32(header.data() + 4);
+
+    if (type != 0x49730000 && type != 0x69620000)
+        throw std::runtime_error(
+            std::format("unknown header type {:08x}", type));
+
+    auto s = parse_install(in, header);
+
+    u64 title_id = be64(s.tmd.data() + 0x18C);
+
+    std::vector<ExtractedFile> files;
+
+    files.push_back({
+        std::format("{:016x}.cert", title_id),
+        s.cert
+    });
+
+    files.push_back({
+        std::format("{:016x}.tik", title_id),
+        s.tik
+    });
+
+    files.push_back({
+        std::format("{:016x}.tmd", title_id),
+        s.tmd
+    });
+
+    if (s.trailer_len > 0) {
+        files.push_back({
+            std::format("{:016x}.trailer", title_id),
+            s.trailer
+        });
+    }
+
+    extract_contents_decrypted(s, files);
+
+    return files;
 }

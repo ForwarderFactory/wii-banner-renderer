@@ -221,8 +221,8 @@ int process(const Render& input_opening, Settings settings = {}) {
 	std::array<Point, 4> points = {{
 		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
 		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
-		{1853 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
-		{1853 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
+		{1833 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
+		{1833 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
 	}};
 
 	std::array<Point, 4> points_icon = {{
