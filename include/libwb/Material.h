@@ -25,6 +25,8 @@ distribution.
 
 #include <libwb/Animator.h>
 #include <libwb/Texture.h>
+#include <libwb/Funcs.h>
+#include <libwb/WrapGx.h>
 
 namespace WiiBanner
 {
@@ -56,6 +58,27 @@ public:
 	}
 	void Apply(const Resources& resources) const;
 	void ApplyTextures(const Resources& resources) const;
+
+	const GXColor& GetColor() const { return color; }
+
+	uint8_t GetColorMatSrc() const { return chan_ctrl.color_mat_src; }
+	uint8_t GetAlphaMatSrc() const { return chan_ctrl.alpha_mat_src; }
+
+	GXColor GetChannelColor(const GXColor& vertex_color, uint8_t render_alpha) const
+	{
+		const GXColor& rgb_source =
+			(chan_ctrl.color_mat_src == GX_SRC_VTX) ? vertex_color : color;
+
+		const uint8_t alpha_source =
+			(chan_ctrl.alpha_mat_src == GX_SRC_VTX) ? vertex_color.a : color.a;
+
+		return GXColor{
+			rgb_source.r,
+			rgb_source.g,
+			rgb_source.b,
+			MultiplyColors(alpha_source, render_alpha)
+		};
+	}
 
 protected:
 	void ProcessHermiteKey(const KeyType& type, float value) override;
@@ -206,7 +229,14 @@ private:
 	};
 	std::vector<TevStage> tev_stages;
 
-	GXColor color{};	// TODO: where is "color" used?
+	GXColor color{};	// material register color, used when a channel's matsrc is GX_SRC_REG
+
+	struct
+	{
+		uint8_t color_mat_src = GX_SRC_VTX;
+		uint8_t alpha_mat_src = GX_SRC_VTX;
+
+	} chan_ctrl{};
 
 	GXColorS10 color_regs[3]{};
 	GXColor color_constants[4]{};

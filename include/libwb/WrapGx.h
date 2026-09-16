@@ -67,6 +67,10 @@ distribution.
 
 #define		GX_TEXCOORD0	0
 
+// channel color/alpha source (GX_SetChanCtrl "matsrc")
+#define		GX_SRC_REG		0	// use the material's constant register color
+#define		GX_SRC_VTX		1	// use the per-vertex color
+
 typedef float f32;
 
 // watev
