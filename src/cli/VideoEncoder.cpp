@@ -1,4 +1,6 @@
 #include "VideoEncoder.h"
+
+#include <filesystem>
 #include <iostream>
 #include <libavutil/log.h>
 
@@ -271,6 +273,9 @@ void VideoEncoder::writeAudioFramesFromFile() {
 }
 
 void VideoEncoder::initAudioEncoder(const std::string& audio_path) {
+	if (!std::filesystem::is_regular_file(audio_path)) {
+		return;
+	}
 	if (avformat_open_input(&audio_input_ctx, audio_path.c_str(), nullptr, nullptr) < 0) {
 		throw std::runtime_error("Could not open audio file: " + audio_path);
 	}
