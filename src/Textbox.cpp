@@ -69,6 +69,31 @@ void Textbox::Load(std::istream& file)
 	}
 }
 
+namespace
+{
+
+	void SetupTextTevStages()
+	{
+		GX_SetTevOrder(0, GX_TEXCOORD0, 0, 4);
+		GX_SetTevColorIn(0, 0xf, 0xf, 0xf, 8);
+		GX_SetTevAlphaIn(0, 0x7, 0x7, 0x7, 4);
+		GX_SetTevColorOp(0, 0, 0, 0, 1, 0);
+		GX_SetTevAlphaOp(0, 0, 0, 0, 1, 0);
+		GX_SetTevSwapMode(0, 0, 0);
+
+		GX_SetTevOrder(1, 0xff, 0xff, 4);
+		GX_SetTevColorIn(1, 0xf, 0, 0xa, 0xf);
+		GX_SetTevAlphaIn(1, 0x7, 0, 5, 0x7);
+		GX_SetTevColorOp(1, 0, 0, 0, 1, 0);
+		GX_SetTevAlphaOp(1, 0, 0, 0, 1, 0);
+		GX_SetTevSwapMode(1, 0, 0);
+
+		// we must call this last cuz this generates and compiles the shader
+		GX_SetNumTevStages(2);
+	}
+
+}
+
 void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 {
 	if (text.empty() || font_index >= resources.fonts.size())
@@ -84,6 +109,8 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		material = resources.materials[material_index];
 		material->Apply(resources);
 	}
+
+	SetupTextTevStages();
 
 	const float scale_x = font_width / font->GetWidth();
 	const float scale_y = font_height / font->GetHeight();
