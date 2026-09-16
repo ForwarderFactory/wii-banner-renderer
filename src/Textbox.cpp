@@ -32,6 +32,7 @@ distribution.
 #include "../include/libwb/Textbox.h"
 #include "../include/libwb/Layout.h"
 #include "../include/libwb/Endian.h"
+#include "../include/libwb/Material.h"
 
 namespace WiiBanner
 {
@@ -77,8 +78,12 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 	if (!font || !font->IsLoaded() || !font->GetWidth() || !font->GetHeight())
 		return;
 
+	const Material* material = nullptr;
 	if (material_index < resources.materials.size())
-		resources.materials[material_index]->Apply(resources);
+	{
+		material = resources.materials[material_index];
+		material->Apply(resources);
+	}
 
 	const float scale_x = font_width / font->GetWidth();
 	const float scale_y = font_height / font->GetHeight();
@@ -164,24 +169,24 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		const float glyph_x = x_position + glyph.widths.left * scale_x;
 		const float glyph_width = glyph.widths.glyph_width * scale_x;
 
+		const GXColor bottom_color = material
+			? material->GetChannelColor(colors[1], render_alpha)
+			: GXColor{ colors[1].r, colors[1].g, colors[1].b, MultiplyColors(colors[1].a, render_alpha) };
+
+		const GXColor top_color = material
+			? material->GetChannelColor(colors[0], render_alpha)
+			: GXColor{ colors[0].r, colors[0].g, colors[0].b, MultiplyColors(colors[0].a, render_alpha) };
+
 		glBegin(GL_QUADS);
 
-		glColor4ub(
-			colors[1].r,
-			colors[1].g,
-			colors[1].b,
-			MultiplyColors(colors[1].a, render_alpha));
+		glColor4ub(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
 		glTexCoord2f(glyph.s1, glyph.t2);
 		glVertex2f(glyph_x, y_position);
 
 		glTexCoord2f(glyph.s2, glyph.t2);
 		glVertex2f(glyph_x + glyph_width, y_position);
 
-		glColor4ub(
-			colors[0].r,
-			colors[0].g,
-			colors[0].b,
-			MultiplyColors(colors[0].a, render_alpha));
+		glColor4ub(top_color.r, top_color.g, top_color.b, top_color.a);
 		glTexCoord2f(glyph.s2, glyph.t1);
 		glVertex2f(glyph_x + glyph_width, y_position + font_height);
 

@@ -27,6 +27,7 @@ distribution.
 #include <libwb/Layout.h>
 #include <libwb/Endian.h>
 #include <libwb/Funcs.h>
+#include <libwb/Material.h>
 
 namespace WiiBanner
 {
@@ -193,17 +194,26 @@ void Quad::Load(std::istream& file)
 
 	void Quad::Draw(const Resources& resources, uint8_t render_alpha) const
 {
+	const Material* material = nullptr;
+
 	if (material_index < resources.materials.size())
-		resources.materials[material_index]->Apply(resources);
+	{
+		material = resources.materials[material_index];
+		material->Apply(resources);
+	}
 
 	auto quad_vertex = [=](unsigned int v, float x, float y)
 	{
-		glColor4ub(
-			vertex_colors[v].r,
-			vertex_colors[v].g,
-			vertex_colors[v].b,
-			MultiplyColors(vertex_colors[v].a, render_alpha)
-		);
+		const GXColor draw_color = material
+			? material->GetChannelColor(vertex_colors[v], render_alpha)
+			: GXColor{
+				vertex_colors[v].r,
+				vertex_colors[v].g,
+				vertex_colors[v].b,
+				MultiplyColors(vertex_colors[v].a, render_alpha)
+			};
+
+		glColor4ub(draw_color.r, draw_color.g, draw_color.b, draw_color.a);
 
 		if (tex_coords.size() == 1)
 		{

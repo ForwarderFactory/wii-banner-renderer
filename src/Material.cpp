@@ -79,20 +79,8 @@ void Material::Load(std::istream& file) {
 	// channel control
 	if (flags.channel_control)
 	{
-		uint8_t color_matsrc, alpha_matsrc;
-
-		file >> BE >> color_matsrc >> alpha_matsrc;
+		file >> BE >> chan_ctrl.color_mat_src >> chan_ctrl.alpha_mat_src;
 		file.seekg(2, std::ios::cur);
-
-		if (color_matsrc != alpha_matsrc)
-		{
-			//std::cout << "color: " << (int)color_matsrc
-			//	<< " alpha: " << (int)alpha_matsrc
-			//	<< '\n';
-			//std::cin.get();
-		}
-
-		//std::cout << "color_matsrc: " << (int)color_matsrc << " alpha_matsrc: " << (int)alpha_matsrc << '\n';
 	}
 
 	// material color
@@ -169,40 +157,102 @@ void Material::Load(std::istream& file) {
 	}
 	if (!flags.tev_stage)
 	{
-		// set up defaults, this seems dumb/wrong
+		constexpr uint8_t CPREV = 0, C0 = 2, C1 = 4, TEXC = 8, RASC = 10, KONST = 14, CZERO = 15;
+		constexpr uint8_t APREV = 0, A0 = 1, A1 = 2, TEXA = 4, RASA = 5, AKONST = 6, AZERO = 7;
+		constexpr uint8_t DISABLED = 0xff;
 
-		TevStage tev{};
-		memset(tev.data, 0, sizeof(tev.data));
+		auto make_stage = [](uint8_t tex_map, uint8_t tex_coord,
+			uint8_t ca, uint8_t cb, uint8_t cc, uint8_t cd,
+			uint8_t aa, uint8_t ab, uint8_t ac, uint8_t ad,
+			uint8_t kcolor_sel = 0, uint8_t kalpha_sel = 0)
+		{
+			TevStage tev{};
+			memset(tev.data, 0, sizeof(tev.data));
 
-		// 1st stage
-		tev.color_in.a = 2;
-		tev.color_in.b = 4;
-		tev.color_in.c = 8;
-		tev.color_in.d = 0xf;
+			tev.tex_map = tex_map;
+			tev.tex_coord = tex_coord;
 
-		tev.alpha_in.a = 1;
-		tev.alpha_in.b = 2;
-		tev.alpha_in.c = 4;
-		tev.alpha_in.d = 0x7;
+			tev.color_in.a = ca;
+			tev.color_in.b = cb;
+			tev.color_in.c = cc;
+			tev.color_in.d = cd;
+			tev.color_in.clamp = 1;
+			tev.color_in.constant_sel = kcolor_sel;
 
-		tev.tex_map = 0;
+			tev.alpha_in.a = aa;
+			tev.alpha_in.b = ab;
+			tev.alpha_in.c = ac;
+			tev.alpha_in.d = ad;
+			tev.alpha_in.clamp = 1;
+			tev.alpha_in.constant_sel = kalpha_sel;
 
-		tev_stages.push_back(tev);
+			return tev;
+		};
 
-		// 2nd stage
-		tev.color_in.a = 0xf;
-		tev.color_in.b = 0;
-		tev.color_in.c = 10;
-		tev.color_in.d = 0xf;
+		if (flags.texture_map == 0)
+		{
+			tev_stages.push_back(make_stage(
+				DISABLED, DISABLED,
+				CZERO, C1, RASC, CZERO,
+				AZERO, A1, RASA, AZERO));
+		}
+		else if (flags.texture_map == 1)
+		{
+			tev_stages.push_back(make_stage(
+				0, 0,
+				C0, C1, TEXC, CZERO,
+				A0, A1, TEXA, AZERO));
 
-		tev.alpha_in.a = 0x7;
-		tev.alpha_in.b = 0;
-		tev.alpha_in.c = 5;
-		tev.alpha_in.d = 0x7;
+			tev_stages.push_back(make_stage(
+				DISABLED, DISABLED,
+				CZERO, CPREV, RASC, CZERO,
+				AZERO, APREV, RASA, AZERO));
+		}
+		else if (flags.texture_map == 2)
+		{
+			tev_stages.push_back(make_stage(
+				0, 0,
+				CZERO, CZERO, CZERO, TEXC,
+				AZERO, AZERO, AZERO, TEXA));
 
-		tev.tex_map = 0;
+			tev_stages.push_back(make_stage(
+				1, 1,
+				TEXC, CPREV, KONST, CZERO,
+				TEXA, APREV, AKONST, AZERO,
+				0x1f, 0x1f));
 
-		tev_stages.push_back(tev);
+			tev_stages.push_back(make_stage(
+				DISABLED, DISABLED,
+				CZERO, CPREV, RASC, CZERO,
+				AZERO, APREV, RASA, AZERO));
+		}
+		else
+		{
+			static const uint8_t k_select[] = { 0x1f, 0x1b, 0x17, 0x13, 0x1e, 0x1a, 0x16, 0x12 };
+
+			for (uint32_t i = 0; i != flags.texture_map && i != MAX_TEV_STAGES; ++i)
+			{
+				const uint8_t cd = i ? CZERO : CPREV;
+				const uint8_t ad = i ? AZERO : APREV;
+				const uint8_t ksel = k_select[i < 8 ? i : 0];
+
+				tev_stages.push_back(make_stage(
+					(uint8_t)i, (uint8_t)i,
+					CZERO, TEXC, KONST, cd,
+					AZERO, TEXA, AKONST, ad,
+					ksel, ksel));
+			}
+
+			tev_stages.push_back(make_stage(
+				DISABLED, DISABLED,
+				C0, C1, CPREV, CZERO,
+				A0, A1, APREV, AZERO));
+
+			tev_stages.push_back(make_stage(
+				DISABLED, DISABLED,
+				CZERO, CPREV, RASC, CZERO,
+				AZERO, APREV, RASA, AZERO));
+		}
 	}
 
 	// alpha compare
@@ -475,7 +525,6 @@ void Material::Apply(const Resources& resources) const
 	GX_SetNumTevStages(i);
 	}
 
-	// currently this will do nothing because of vertex_colors
 	glColor4ubv(&color.r);
 }
 
