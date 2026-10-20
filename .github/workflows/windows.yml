@@ -22,36 +22,31 @@ jobs:
           mingw-w64-x86_64-toolchain
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-make
-          mingw-w64-x86_64-glew
           mingw-w64-x86_64-ffmpeg
-          
+          mingw-w64-x86_64-glew
+
     - name: Build
       shell: msys2 {0}
       run: |
-        mkdir build
+        mkdir -p build
         cd build
         cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
         cmake --build .
 
-
-    - name: Download FFmpeg
-      shell: powershell
-      run: |
-        Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile ffmpeg.zip
-        Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
-
-        $ffmpegExe = Get-ChildItem -Recurse -Filter ffmpeg.exe ffmpeg | Select-Object -First 1
-        Copy-Item $ffmpegExe.FullName build\ffmpeg.exe
+        cp /mingw64/bin/libavcodec-*.dll .
+        cp /mingw64/bin/libavformat-*.dll .
+        cp /mingw64/bin/libavutil-*.dll .
+        cp /mingw64/bin/libswresample-*.dll .
+        cp /mingw64/bin/libswscale-*.dll .
+        cp /mingw64/bin/libgcc_s_seh-1.dll .
 
     - name: Create ZIP
       shell: powershell
       run: |
-        Compress-Archive -Path build\wbr.exe, build\ffmpeg.exe -DestinationPath release.zip
+        Compress-Archive -Path build\wbr.exe, build\*.dll -DestinationPath release.zip
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-build
         path: release.zip
-
-        
