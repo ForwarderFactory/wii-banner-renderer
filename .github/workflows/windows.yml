@@ -32,13 +32,12 @@ jobs:
         cd build
         cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
         cmake --build .
-
-        cp /mingw64/bin/libavcodec-*.dll .
-        cp /mingw64/bin/libavformat-*.dll .
-        cp /mingw64/bin/libavutil-*.dll .
-        cp /mingw64/bin/libswresample-*.dll .
-        cp /mingw64/bin/libswscale-*.dll .
-        cp /mingw64/bin/libgcc_s_seh-1.dll .
+        
+        for dll in $(ldd wbr.exe | awk '/mingw|ucrt|clang/ { print $3 }' | sort -u); do
+          if [ -n "$dll" ] && [ -f "$dll" ]; then
+            cp "$dll" .
+          fi
+        done
 
     - name: Create ZIP
       shell: powershell
