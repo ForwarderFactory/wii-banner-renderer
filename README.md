@@ -34,6 +34,7 @@ doing this is not possible.
 - GLEW
 - OpenGL
 - EGL (Linux only)
+- FFmpeg
 
 ## Prebuilt binaries
 
