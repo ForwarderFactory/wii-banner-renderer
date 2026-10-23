@@ -31,6 +31,15 @@ distribution.
 #include <libwb/Window.h>
 #include <libwb/Endian.h>
 
+#include <cctype>
+#include <cstdio>
+#include <functional>
+#include <cstdlib>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
 namespace WiiBanner
 {
 
@@ -288,51 +297,161 @@ void Layout::AdvanceFrame()
 	SetFrame(frame_current);
 }
 
-void Layout::SetLanguage(const std::string& language)
+namespace
 {
-	bool found_language_group = false;
-	auto root_group = groups.find("RootGroup");
 
-	// hide panes of non-matching languages
-	if (root_group != groups.end())
+	struct LanguageGroup
 	{
-		for (auto& group : root_group->second.groups)
-		{
-			if (group.first == language)
-				found_language_group = true;
+		std::string name;
+		const Layout::Group* group;
+	};
 
-			// some hax, there are some odd "Rso0" "Rso1" groups that shouldn't be hidden
-			// only the 3 character language groups should be
-			if (group.first != language && group.first.length() == 3)
-			{
-				for (auto& pane : group.second.panes)
-				{
-					if (Pane* const found = FindPane(pane))
-						found->SetHide(true);
-				}
-			}
+	void CollectLanguageGroups(
+		const std::map<std::string, Layout::Group>& groups,
+		bool under_root,
+		std::vector<LanguageGroup>& out)
+	{
+		static const std::set<std::string> known_languages =
+		{
+			"JPN", "ENG", "GER", "FRA", "SPA", "ITA", "DUT", "KOR"
+		};
+
+		for (const auto& entry : groups)
+		{
+			// some hax, there are some odd "Rso0" "Rso1" groups that shouldn't
+			// be hidden; under RootGroup only 3 character names are languages
+			const bool is_language = known_languages.count(entry.first) ||
+				(under_root && entry.first.length() == 3);
+
+			if (is_language)
+				out.push_back({ entry.first, &entry.second });
+
+			CollectLanguageGroups(entry.second.groups,
+				entry.first == "RootGroup", out);
 		}
 	}
 
-	// unhide panes of matching language, some banners list language specific panes in multiple language groups
+	void DumpGroups(const std::map<std::string, Layout::Group>& groups, int depth)
+	{
+		for (const auto& entry : groups)
+		{
+			std::printf("[layout] %*sgroup '%s' (%zu panes)\n", depth * 2, "",
+				entry.first.c_str(), entry.second.panes.size());
+			for (const std::string& pane : entry.second.panes)
+				std::printf("[layout] %*s  pane '%s'\n", depth * 2, "", pane.c_str());
+			DumpGroups(entry.second.groups, depth + 1);
+		}
+	}
+
+}
+
+void Layout::SetLanguage(const std::string& language)
+{
+	if (std::getenv("WB_LAYOUT_DEBUG"))
+	{
+		std::printf("[layout] language '%s', group tree:\n", language.c_str());
+		DumpGroups(groups, 0);
+
+		std::printf("[layout] pane tree (name, visible, hide):\n");
+		std::function<void(const PaneList&, int)> dump_panes =
+			[&](const PaneList& list, int depth)
+		{
+			for (Pane* pane : list)
+			{
+				std::printf("[layout] %*s'%s' v=%d h=%d\n", depth * 2, "",
+					pane->GetName().c_str(),
+					pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0);
+				dump_panes(pane->panes, depth + 1);
+			}
+		};
+		dump_panes(panes, 0);
+	}
+
+	std::vector<LanguageGroup> language_groups;
+	CollectLanguageGroups(groups, false, language_groups);
+
+	bool found_language_group = false;
+	for (const LanguageGroup& entry : language_groups)
+	{
+		if (entry.name == language)
+			found_language_group = true;
+	}
+
+	for (const LanguageGroup& entry : language_groups)
+	{
+		if (entry.name == language)
+			continue;
+
+		for (const std::string& pane : entry.group->panes)
+		{
+			if (Pane* const found = FindPane(pane))
+				found->SetHide(true);
+		}
+	}
+
 	if (found_language_group)
 	{
-		for (auto& pane : root_group->second.groups.at(language).panes)
+		for (const LanguageGroup& entry : language_groups)
 		{
-			Pane* const found = FindPane(pane);
-			if (found)
+			if (entry.name != language)
+				continue;
+
+			for (const std::string& pane : entry.group->panes)
 			{
-				found->SetHide(false);
-				found->SetVisible(true);
+				if (Pane* const found = FindPane(pane))
+				{
+					found->SetHide(false);
+					found->SetVisible(true);
+				}
 			}
 		}
 		return;
 	}
 
-	// Some system banners use hidden font_<language> panes instead of
-	// three-letter language groups. Only use this convention when multiple
-	// known language panes are present, so an unrelated pane named font_e is
-	// not treated as a language selector.
+	{
+		static const std::map<std::string, char> language_letters =
+		{
+			{ "JPN", 'J' }, { "ENG", 'E' }, { "GER", 'G' }, { "FRA", 'F' },
+			{ "SPA", 'S' }, { "ITA", 'I' }, { "DUT", 'N' },
+		};
+
+		const auto selected = language_letters.find(language);
+		if (selected != language_letters.end())
+		{
+			std::vector<std::pair<Pane*, char>> logo_panes;
+			std::set<char> letters;
+
+			std::function<void(const PaneList&)> collect =
+				[&](const PaneList& list)
+			{
+				for (Pane* pane : list)
+				{
+					const std::string& name = pane->GetName();
+					if (name.size() >= 9 && name.compare(0, 6, "N_logo") == 0 &&
+						name[7] == '_' &&
+						std::string("JEGFSIN").find(name[6]) != std::string::npos &&
+						std::isdigit(static_cast<unsigned char>(name[8])))
+					{
+						logo_panes.emplace_back(pane, name[6]);
+						letters.insert(name[6]);
+					}
+
+					collect(pane->panes);
+				}
+			};
+			collect(panes);
+
+			if (letters.size() >= 2)
+			{
+				for (auto& entry : logo_panes)
+					entry.first->SetHide(entry.second != selected->second);
+				return;
+			}
+		}
+	}
+
+	/* gross fallback, i imagine nintendo had proprietary code that actually
+	 * handles this properly, but alas, this appears to work. */
 	static const std::map<std::string, std::string> legacy_language_panes = {
 		{"JPN", "font_j"},
 		{"ENG", "font_e"},
