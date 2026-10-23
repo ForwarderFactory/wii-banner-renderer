@@ -75,8 +75,8 @@ namespace
 	void SetupTextTevStages()
 	{
 		GX_SetTevOrder(0, GX_TEXCOORD0, 0, 4);
-		GX_SetTevColorIn(0, 0xf, 0xf, 0xf, 8);
-		GX_SetTevAlphaIn(0, 0x7, 0x7, 0x7, 4);
+		GX_SetTevColorIn(0, 2 /*C0*/, 4 /*C1*/, 8 /*TEXC*/, 0xf /*ZERO*/);
+		GX_SetTevAlphaIn(0, 1 /*A0*/, 2 /*A1*/, 4 /*TEXA*/, 0x7 /*ZERO*/);
 		GX_SetTevColorOp(0, 0, 0, 0, 1, 0);
 		GX_SetTevAlphaOp(0, 0, 0, 0, 1, 0);
 		GX_SetTevSwapMode(0, 0, 0);
@@ -87,6 +87,10 @@ namespace
 		GX_SetTevColorOp(1, 0, 0, 0, 1, 0);
 		GX_SetTevAlphaOp(1, 0, 0, 0, 1, 0);
 		GX_SetTevSwapMode(1, 0, 0);
+
+		GX_SetNumIndStages(0);
+		GX_SetTevIndirect(0, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
+		GX_SetTevIndirect(1, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
 
 		// we must call this last cuz this generates and compiles the shader
 		GX_SetNumTevStages(2);
@@ -196,6 +200,10 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		const float glyph_x = x_position + glyph.widths.left * scale_x;
 		const float glyph_width = glyph.widths.glyph_width * scale_x;
 
+		const float glyph_height = glyph.height * scale_y;
+		const float glyph_top = y_position + font_height;
+		const float glyph_bottom = glyph_top - glyph_height;
+
 		const GXColor bottom_color = material
 			? material->GetChannelColor(colors[1], render_alpha)
 			: GXColor{ colors[1].r, colors[1].g, colors[1].b, MultiplyColors(colors[1].a, render_alpha) };
@@ -208,17 +216,17 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 		glColor4ub(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
 		glTexCoord2f(glyph.s1, glyph.t2);
-		glVertex2f(glyph_x, y_position);
+		glVertex2f(glyph_x, glyph_bottom);
 
 		glTexCoord2f(glyph.s2, glyph.t2);
-		glVertex2f(glyph_x + glyph_width, y_position);
+		glVertex2f(glyph_x + glyph_width, glyph_bottom);
 
 		glColor4ub(top_color.r, top_color.g, top_color.b, top_color.a);
 		glTexCoord2f(glyph.s2, glyph.t1);
-		glVertex2f(glyph_x + glyph_width, y_position + font_height);
+		glVertex2f(glyph_x + glyph_width, glyph_top);
 
 		glTexCoord2f(glyph.s1, glyph.t1);
-		glVertex2f(glyph_x, y_position + font_height);
+		glVertex2f(glyph_x, glyph_top);
 
 		glEnd();
 
