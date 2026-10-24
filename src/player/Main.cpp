@@ -427,9 +427,6 @@ int main(int argc, char** argv) {
 
     std::deque<Banner> channels = scan_channels(channel_dir, font_archive);
 
-    if (channels.empty())
-        std::cerr << "No usable channels -- the grid will be empty. Check the skip reasons above.\n";
-
     Rect icon_crop = GetCrop(g_icon_points);
     Rect banner_crop = GetCrop(g_banner_points);
 
