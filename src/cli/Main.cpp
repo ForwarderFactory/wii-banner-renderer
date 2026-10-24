@@ -269,6 +269,10 @@ int process(const Render& input_opening, Settings settings = {}) {
 
     	encoder.writeVideoFrame(renderer.GetFrameData(crop).data());
 
+    	// more possible debugging here
+    	if (i % 30 == 0)
+    		layout->DebugTrace(std::getenv("WB_PANE_TRACE"));
+
     	layout->AdvanceFrame();
     }
 

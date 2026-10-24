@@ -211,6 +211,20 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
       layout->Load(in);
    }
 
+   if (std::getenv("WB_PANE_TRACE"))
+   {
+      std::cout << "[trace] static values from the layout file, before any animation:\n";
+      layout->DebugTrace(std::getenv("WB_PANE_TRACE"));
+   }
+
+   if (std::getenv("WB_LAYOUT_DEBUG"))
+   {
+      std::cout << "[layout] " << lyt_name << " lyt1: centered="
+                << layout->GetCentered() << " size=" << layout->GetWidth()
+                << "x" << layout->GetHeight() << ", overridden to "
+                << size.x << "x" << size.y << '\n';
+   }
+
    layout->SetWidth(size.x);
    layout->SetHeight(size.y);
 
@@ -322,6 +336,14 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
       	std::cerr << "Unable to load font: " << font->GetName() << '\n';
 #endif
       }
+   }
+
+   // some debugging possible here
+   if (std::getenv("WB_LAYOUT_DEBUG"))
+   {
+      std::cout << "[layout] " << lyt_name << " animations: start='"
+                << start_path << "' (" << length_start << " frames), loop='"
+                << loop_path << "' (" << length_loop << " frames)\n";
    }
 
    layout->SetLoopStart(length_start);

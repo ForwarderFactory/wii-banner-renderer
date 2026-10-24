@@ -2,6 +2,7 @@
 Copyright (c) 2010 - Wii Banner Player Project
 Copyright (c) 2012 - giantpune
 Copyright (c) 2012 - Dimok
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -26,6 +27,9 @@ distribution.
 #include <GL/glew.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -67,16 +71,138 @@ void Textbox::Load(std::istream& file)
 			break;
 		text.push_back(static_cast<char16_t>(character));
 	}
+
+	// more debugging
+	if (std::getenv("WB_TEXT_DEBUG")) {
+		bool has_control = false;
+		for (char16_t c : text)
+			has_control = has_control || (c < 0x20 && c != u'\n');
+
+		if (has_control)
+		{
+			std::printf("[text] %zu units:", text.size());
+			for (char16_t c : text)
+				std::printf(" %04X", static_cast<unsigned>(c));
+			std::printf("\n[text] ascii:   ");
+			for (char16_t c : text)
+				std::printf("%c", (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : '.');
+			std::printf("\n");
+		}
+	}
 }
 
-namespace
-{
+namespace {
+	float NextTabStop(float position, float tab_stop)
+	{
+		if (!(tab_stop > 0.f))
+			return position;
+		return (std::floor(position / tab_stop + 0.0001f) + 1.f) * tab_stop;
+	}
+
+	float MeasureLine(const Font& font, const std::u16string& line,
+		float scale_x, float space_char, float tab_stop)
+	{
+		float width = 0.f;
+		bool first = true;
+		for (char16_t character : line)
+		{
+			if (character == u'\t')
+			{
+				width = NextTabStop(width, tab_stop);
+				first = true;
+				continue;
+			}
+
+			Font::Glyph glyph;
+			if (!font.GetGlyph(static_cast<uint16_t>(character), glyph))
+				continue;
+			if (!first)
+				width += space_char;
+			width += glyph.widths.char_width * scale_x;
+			first = false;
+		}
+		return width;
+	}
+
+	std::u16string LayoutText(const Font& font, const std::u16string& source,
+		float scale_x, float space_char, float tab_stop, float box_width)
+	{
+		std::u16string clean;
+		clean.reserve(source.size());
+		for (char16_t character : source)
+		{
+			if (character == u'\n' || character == u'\t' || character >= 0x20)
+				clean.push_back(character);
+		}
+
+		if (!(box_width > 0.f))
+			return clean;
+
+		const float limit = box_width + 0.01f;
+		std::u16string out;
+		size_t pos = 0;
+
+		while (true)
+		{
+			size_t eol = clean.find(u'\n', pos);
+			if (eol == std::u16string::npos)
+				eol = clean.size();
+
+			std::u16string line;
+			bool have_word = false;
+			size_t p = pos;
+			while (true)
+			{
+				size_t space = clean.find(u' ', p);
+				if (space == std::u16string::npos || space > eol)
+					space = eol;
+
+				const std::u16string word = clean.substr(p, space - p);
+				if (!have_word)
+				{
+					line = word;
+					have_word = true;
+				}
+				else
+				{
+					std::u16string candidate = line;
+					candidate.push_back(u' ');
+					candidate += word;
+
+					if (!word.empty() && !line.empty() &&
+						MeasureLine(font, candidate, scale_x, space_char, tab_stop) > limit)
+					{
+						out += line;
+						out.push_back(u'\n');
+						line = word;
+					}
+					else
+					{
+						line = std::move(candidate);
+					}
+				}
+
+				if (space >= eol)
+					break;
+				p = space + 1;
+			}
+
+			out += line;
+			if (eol >= clean.size())
+				break;
+			out.push_back(u'\n');
+			pos = eol + 1;
+		}
+
+		return out;
+	}
 
 	void SetupTextTevStages()
 	{
 		GX_SetTevOrder(0, GX_TEXCOORD0, 0, 4);
-		GX_SetTevColorIn(0, 0xf, 0xf, 0xf, 8);
-		GX_SetTevAlphaIn(0, 0x7, 0x7, 0x7, 4);
+
+		GX_SetTevColorIn(0, 2 /*C0*/, 4 /*C1*/, 8 /*TEXC*/, 0xf /*ZERO*/);
+		GX_SetTevAlphaIn(0, 1 /*A0*/, 2 /*A1*/, 4 /*TEXA*/, 0x7 /*ZERO*/);
 		GX_SetTevColorOp(0, 0, 0, 0, 1, 0);
 		GX_SetTevAlphaOp(0, 0, 0, 0, 1, 0);
 		GX_SetTevSwapMode(0, 0, 0);
@@ -88,7 +214,10 @@ namespace
 		GX_SetTevAlphaOp(1, 0, 0, 0, 1, 0);
 		GX_SetTevSwapMode(1, 0, 0);
 
-		// we must call this last cuz this generates and compiles the shader
+		GX_SetNumIndStages(0);
+		GX_SetTevIndirect(0, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
+		GX_SetTevIndirect(1, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
+
 		GX_SetNumTevStages(2);
 	}
 
@@ -119,13 +248,27 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		: font_height;
 	const float line_advance = font_line_feed + space_line;
 
+	const float tab_stop = 4.f * font_width;
+
+	const std::u16string laid_out = LayoutText(
+		*font, text, scale_x, space_char, tab_stop, GetWidth());
+	if (laid_out.empty())
+		return;
+
 	std::vector<float> line_widths(1, 0.f);
 	bool first_character = true;
-	for (char16_t character : text)
+	for (char16_t character : laid_out)
 	{
 		if (character == u'\n')
 		{
 			line_widths.push_back(0.f);
+			first_character = true;
+			continue;
+		}
+
+		if (character == u'\t')
+		{
+			line_widths.back() = NextTabStop(line_widths.back(), tab_stop);
 			first_character = true;
 			continue;
 		}
@@ -157,6 +300,7 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 	};
 
 	float x_position = line_start(0);
+	float line_origin = x_position;
 	float y_position = -0.5f * (
 		align_vertical * -frame_height +
 		GetHeight() * (align_vertical - (2 - GetOriginY()))) - font_height;
@@ -166,7 +310,7 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 	glPushMatrix();
 
-	for (char16_t character : text)
+	for (char16_t character : laid_out)
 	{
 		if (character == u'\n')
 		{
@@ -174,7 +318,16 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 			if (line_number >= line_widths.size())
 				break;
 			x_position = line_start(line_number);
+			line_origin = x_position;
 			y_position -= line_advance;
+			first_character = true;
+			continue;
+		}
+
+		if (character == u'\t')
+		{
+			x_position = line_origin +
+				NextTabStop(x_position - line_origin, tab_stop);
 			first_character = true;
 			continue;
 		}
@@ -196,6 +349,10 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		const float glyph_x = x_position + glyph.widths.left * scale_x;
 		const float glyph_width = glyph.widths.glyph_width * scale_x;
 
+		const float glyph_height = glyph.height * scale_y;
+		const float glyph_top = y_position + font_height;
+		const float glyph_bottom = glyph_top - glyph_height;
+
 		const GXColor bottom_color = material
 			? material->GetChannelColor(colors[1], render_alpha)
 			: GXColor{ colors[1].r, colors[1].g, colors[1].b, MultiplyColors(colors[1].a, render_alpha) };
@@ -208,17 +365,17 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 		glColor4ub(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
 		glTexCoord2f(glyph.s1, glyph.t2);
-		glVertex2f(glyph_x, y_position);
+		glVertex2f(glyph_x, glyph_bottom);
 
 		glTexCoord2f(glyph.s2, glyph.t2);
-		glVertex2f(glyph_x + glyph_width, y_position);
+		glVertex2f(glyph_x + glyph_width, glyph_bottom);
 
 		glColor4ub(top_color.r, top_color.g, top_color.b, top_color.a);
 		glTexCoord2f(glyph.s2, glyph.t1);
-		glVertex2f(glyph_x + glyph_width, y_position + font_height);
+		glVertex2f(glyph_x + glyph_width, glyph_top);
 
 		glTexCoord2f(glyph.s1, glyph.t1);
-		glVertex2f(glyph_x, y_position + font_height);
+		glVertex2f(glyph_x, glyph_top);
 
 		glEnd();
 

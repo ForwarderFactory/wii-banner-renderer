@@ -407,19 +407,18 @@ void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
 	glLogicOp(logic_ops[op & 0xf]);
 }
 
-// TODO: incomplete
 void 	GX_SetAlphaCompare (u8 comp0, u8 ref0, u8 aop, u8 comp1, u8 ref1)
 {
 	static const GLenum alpha_funcs[] =
 	{
 		GL_NEVER,
+		GL_LESS,
 		GL_EQUAL,
 		GL_LEQUAL,
 		GL_GREATER,
 		GL_NOTEQUAL,
 		GL_GEQUAL,
 		GL_ALWAYS,
-		GL_ALWAYS,	 // blah
 	};
 
 	glAlphaFunc(alpha_funcs[comp0 & 0x7], (float)ref0 / 255.f);
@@ -1002,8 +1001,10 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		std::cout << "Failed to compile vertex shader\n";
 	}
 
-	if (!frag_compiled) {
+	if (!frag_compiled)
+	{
 		std::cout << "Failed to compile fragment shader\n";
+	}
 	}
 	}
 
