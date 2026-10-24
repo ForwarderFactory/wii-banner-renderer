@@ -9,6 +9,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(WB_BUILD_PLAYER ON)
+set(WB_BUILD_CLI ON)
+
 add_library(wb STATIC
         src/old/Blob.cpp
         src/old/CDUtils.cpp
@@ -47,15 +50,6 @@ target_include_directories(wb
 )
 
 find_package(OpenGL REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(FFMPEG REQUIRED
-        libavformat
-        libavcodec
-        libavutil
-        libswscale
-        libswresample
-)
 
 include(FetchContent)
 
@@ -168,21 +162,87 @@ install(
 )
 
 ## command line utility
+if (WB_BUILD_CLI)
+        find_package(PkgConfig REQUIRED)
 
-add_executable(wbr
-        src/cli/Main.cpp
-        src/cli/VideoEncoder.cpp
-)
+        pkg_check_modules(FFMPEG REQUIRED
+                libavformat
+                libavcodec
+                libavutil
+                libswscale
+                libswresample
+        )
+        add_executable(wbr
+                src/cli/Main.cpp
+                src/cli/VideoEncoder.cpp
+        )
 
-target_include_directories(wbr PRIVATE include/cli)
+        target_include_directories(wbr PRIVATE include/cli)
 
-target_link_libraries(wbr
-        PRIVATE
-        wb::wb
-        ${FFMPEG_LIBRARIES}
-)
+        target_link_libraries(wbr
+                PRIVATE
+                wb::wb
+                ${FFMPEG_LIBRARIES}
+        )
 
-install(
-        TARGETS wbr
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+        install(
+                TARGETS wbr
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+endif()
+
+# player
+if (WB_BUILD_PLAYER)
+    add_executable(wbp src/player/Main.cpp)
+
+    target_include_directories(wbp PRIVATE include/player)
+
+    include(FetchContent)
+
+    find_package(SDL3 CONFIG QUIET)
+
+    if (NOT SDL3_FOUND)
+        message(STATUS "SDL3 not found, fetching SDL3...")
+
+        FetchContent_Declare(
+                SDL3
+                GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+                GIT_TAG release-3.4.16
+                GIT_SHALLOW TRUE
+        )
+
+        FetchContent_MakeAvailable(SDL3)
+    endif()
+
+    find_package(SDL3_mixer CONFIG QUIET)
+
+    if (NOT SDL3_mixer_FOUND)
+        message(STATUS "SDL3_mixer not found, fetching SDL3_mixer...")
+
+        set(SDLMIXER_OPUS OFF CACHE BOOL "" FORCE)
+        set(SDLMIXER_MOD_XMP OFF CACHE BOOL "" FORCE)
+        set(SDLMIXER_VORBIS OFF CACHE BOOL "" FORCE)
+        set(SDLMIXER_FLAC OFF CACHE BOOL "" FORCE)
+        set(SDLMIXER_MP3 OFF CACHE BOOL "" FORCE)
+        set(SDLMIXER_MIDI OFF CACHE BOOL "" FORCE)
+
+        FetchContent_Declare(
+                SDL3_mixer
+                GIT_REPOSITORY https://github.com/libsdl-org/SDL_mixer.git
+                GIT_TAG release-3.2.4
+                GIT_SHALLOW TRUE
+        )
+
+        FetchContent_MakeAvailable(SDL3_mixer)
+    endif()
+
+    target_link_libraries(wbp PRIVATE
+            wb::wb
+            SDL3::SDL3
+            SDL3_mixer::SDL3_mixer
+    )
+
+    install(TARGETS wbp
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()

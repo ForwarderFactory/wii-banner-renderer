@@ -93,7 +93,9 @@ namespace WiiBanner {
 					std::string name;
 					std::getline(file, name, '\0'); // null-terminated string
 
+#ifdef WB_DEBUG
 					std::cout << "File: " << name << std::endl;
+#endif
 
 					layout.AddPalette(name, key_set);
 				}
@@ -120,11 +122,11 @@ namespace WiiBanner {
 					if (animator)
 						animator->LoadKeyFrames(file, tag_count, origin, key_set);
 				});
-			}
-			else
-			{
+			} else {
+#ifdef WB_DEBUG
 				std::cout << "UNKNOWN SECTION: ";
 				std::cout << magic << '\n';
+#endif
 			}
 		});
 
@@ -170,7 +172,9 @@ void Animator::LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamo
 				break;
 
 			default:
+#ifdef WB_DEBUG
 				std::cout << "UNKNOWN FRAME DATA TYPE!!\n";
+#endif
 				break;
 			}
 		});

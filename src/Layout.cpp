@@ -131,8 +131,6 @@ void Layout::Load(std::istream& file)
 				resources.textures.push_back(texture);
 
 			}, 4);
-
-			std::cout << "Loaded " << resources.textures.size() << " Textures\n";
 		}
 		else if (magic == FontList::BINARY_MAGIC)
 		{
@@ -150,8 +148,6 @@ void Layout::Load(std::istream& file)
 				resources.fonts.push_back(font);
 
 			}, 4);
-
-			std::cout << "Loaded " << resources.fonts.size() << " Fonts\n";
 		}
 		else if (magic == MaterialList::BINARY_MAGIC)
 		{
@@ -167,8 +163,6 @@ void Layout::Load(std::istream& file)
 				mat->Load(file);
 				resources.materials.push_back(mat);
 			});
-
-			std::cout << "Loaded " << resources.materials.size() << " Materials\n";
 		}
 		else if (magic == Pane::BINARY_MAGIC)
 		{
@@ -573,31 +567,19 @@ Texture* Layout::FindTexture(const std::string& find_name) {
 }
 
 void Layout::AddPalette(const std::string& name, uint8_t key_set) {
-	std::cout << "AddPalette: " << name << "\n";
-
 	if (resources.palettes.size() <= key_set)
 		resources.palettes.resize(key_set + 1);
 
 	resources.palettes.at(key_set).push_back(name);
 
-	if (FindTexture(name))
-	{
-		std::cout << "already exists\n";
+	if (FindTexture(name)) {
 		return;
 	}
 
 	auto* texture = new Texture;
 	texture->SetName(name);
 
-	std::cout << "Creating texture "
-		  << texture
-		  << " name="
-		  << texture->GetName()
-		  << "\n";
-
 	resources.textures.push_back(texture);
-
-	std::cout << "added texture: " << texture->GetName() << "\n";
 }
 
 Pane* Layout::FindPane(const std::string& find_name)

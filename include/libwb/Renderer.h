@@ -82,6 +82,8 @@ public:
 private:
     void CreateContext();
     void DestroyContext();
+
+    void MakeCurrent();
 #if defined(__APPLE__)
     void CreateFramebuffer();
     void DestroyFramebuffer();

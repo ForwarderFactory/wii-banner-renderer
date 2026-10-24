@@ -1,3 +1,26 @@
+/*
+Copyright (c) 2026 - Jacob Nilsson
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+claim that you wrote the original software. If you use this software
+in a product, an acknowledgment in the product documentation would be
+appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source
+distribution.
+*/
+
 #include "../include/libwb/Renderer.h"
 
 #include <memory>
@@ -430,17 +453,44 @@ void Renderer::DestroyContext()
 #endif
 
 
+#ifdef GL_WIN
+void Renderer::MakeCurrent()
+{
+    wglMakeCurrent(static_cast<HDC>(m_hdc), static_cast<HGLRC>(m_context));
+}
+#elifdef GL_MACOS
+void Renderer::MakeCurrent()
+{
+    CGLSetCurrentContext(static_cast<CGLContextObj>(m_context));
+}
+#elifdef GL_LINUX
+void Renderer::MakeCurrent()
+{
+    eglMakeCurrent(m_display, m_surface, m_surface, m_context);
+}
+#endif
 void Renderer::BeginFrame()
 {
-    glClearColor(0, 0, 0, 1);
+    MakeCurrent();
 
+    glMatrixMode(GL_TEXTURE);
+    glLoadIdentity();
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1000.0, 1000.0);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glStencilFunc(GL_ALWAYS, 0, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+    glClearColor(0, 0, 0, 1);
     glClear(
         GL_COLOR_BUFFER_BIT |
         GL_DEPTH_BUFFER_BIT |
         GL_STENCIL_BUFFER_BIT
     );
 }
-
 
 void Renderer::EndFrame()
 {
@@ -544,8 +594,7 @@ std::vector<unsigned char> Renderer::GetFrameData(Rect crop) const
         row_size * static_cast<size_t>(crop.height)
     );
 
-    for (int y = 0; y < crop.height; ++y)
-    {
+    for (int y = 0; y < crop.height; ++y) {
         const int src_y = crop.y + y;
 
         const size_t src_offset =

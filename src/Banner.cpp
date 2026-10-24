@@ -122,49 +122,51 @@ void Banner::LoadBanner()
 		layout_banner = LoadLayout("Banner", offset_banner, Vec2f(608.f, 456.f));
 }
 
-/* defined in header
-void Banner::LoadIcon()
-{
-	if (offset_icon && !layout_icon)
-		layout_icon = LoadLayout("Icon", offset_icon, Vec2f(128.f, 96.f));
-}
-*/
-
-void Banner::LoadSound()
-{
+void Banner::LoadSound() {
+#ifdef WB_DEBUG
     std::cout << "offset_sound = " << offset_sound << "\n";
+#endif
 
     if (offset_sound && !sound)
     {
         std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
 
-        if (!bnr_file)
-        {
+        if (!bnr_file) {
+#ifdef WB_DEBUG
             std::cerr << "Failed to open banner file\n";
+#endif
             return;
         }
 
         bnr_file.seekg(header_bytes + offset_sound, std::ios::beg);
 
+#ifdef WB_DEBUG
         std::cout << "Loading sound at offset "
                   << header_bytes + offset_sound << "\n";
+#endif
 
         auto* const s = new Sound;
 
         if (s->Load(bnr_file))
         {
+#ifdef WB_DEBUG
             std::cout << "Sound loaded\n";
+#endif
             sound = s;
         }
         else
         {
             delete s;
+#ifdef WB_DEBUG
             std::cerr << "s->Load() failed\n";
+#endif
         }
     }
     else
     {
+#ifdef WB_DEBUG
         std::cout << "No sound offset or already loaded\n";
+#endif
     }
 }
 
@@ -188,12 +190,16 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
    u8archive::Archive bin_arc;
    if (!bin_arc.OpenStream(bnr_file, header_bytes + offset, 0, &codec))
    {
+#ifdef WB_DEBUG
       std::cerr << "Unable to open banner archive at offset " << offset << '\n';
+#endif
       return nullptr;
    }
 
+#ifdef WB_DEBUG
    std::cout << lyt_name << ".bin: " << u8archive::CompressionName(codec)
              << ", " << bin_arc.Entries().size() << " entries\n";
+#endif
 
    std::vector<uint8_t> brlyt;
    if (!bin_arc.ReadFile("arc/blyt/" + lyt_name + ".brlyt", brlyt))
@@ -255,16 +261,19 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
 
    for (Texture* texture : layout->resources.textures) {
       std::vector<uint8_t> tpl;
-      if (!bin_arc.ReadFile("arc/timg/" + texture->GetName(), tpl))
-      {
+      if (!bin_arc.ReadFile("arc/timg/" + texture->GetName(), tpl)) {
+#ifdef WB_DEBUG
          std::cerr << "Missing texture: " << texture->GetName() << '\n';
+#endif
          continue;
       }
 
       u8archive::MemoryStream in(tpl);
       texture->Load(in);
+#ifdef WB_DEBUG
       std::cout << "Loaded texture: " << texture->GetName()
                 << " (" << tpl.size() << " bytes)\n";
+#endif
    }
 
    for (Font* font : layout->resources.fonts) {
@@ -274,7 +283,9 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
          u8archive::MemoryStream in(brfnt);
          if (font->Load(in))
          {
+#ifdef WB_DEBUG
             std::cout << "Loaded font: " << font->GetName() << " (banner)\n";
+#endif
             continue;
          }
       }
@@ -312,14 +323,19 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
          u8archive::MemoryStream in(font_data);
          if (font->Load(in))
          {
+#ifdef WB_DEBUG
             std::cout << "Loaded font: " << font->GetName()
                       << " (" << archive_path << ")\n";
+#endif
             break;
          }
       }
 
-      if (!font->IsLoaded())
-         std::cerr << "Unable to load font: " << font->GetName() << '\n';
+      if (!font->IsLoaded()) {
+#ifdef WB_DEBUG
+      	std::cerr << "Unable to load font: " << font->GetName() << '\n';
+#endif
+      }
    }
 
    // some debugging possible here

@@ -204,9 +204,6 @@ void extract_contents_decrypted(const WadSections& s, const std::filesystem::pat
 
         write_file(path, decrypted, decrypted.size());
 
-        std::cout << "  -> " << path
-                  << " (decrypted, " << c.size << " bytes)\n";
-
         offset += padded;
     }
 }
@@ -296,7 +293,6 @@ void Wad::extract_wad(std::ifstream& in, const std::string& out_dir) {
     }
 
     extract_contents_decrypted(s, outdir);
-    std::cout << "Extracted: " << outdir << "\n";
 }
 
 std::vector<Wad::ExtractedFile> Wad::extract_wad(std::ifstream& in)

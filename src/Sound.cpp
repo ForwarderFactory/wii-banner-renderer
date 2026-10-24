@@ -388,8 +388,6 @@ bool Sound::Load(std::istream& file)
     in >> magic;
 
     if (magic == BINARY_MAGIC_WAV) {
-        std::cout << "WAV detected\n";
-
         in >> LE >> file_len;
         in.seekg(start, std::istream::beg);
 
@@ -400,10 +398,7 @@ bool Sound::Load(std::istream& file)
 
     	return ParseWAV();
     }
-    if (magic == BINARY_MAGIC_AIFF)
-    {
-	    std::cout << "AIFF detected\n";
-
+    if (magic == BINARY_MAGIC_AIFF) {
 	    in >> BE >> file_len;
 	    in.seekg(start, std::istream::beg);
 
@@ -414,17 +409,12 @@ bool Sound::Load(std::istream& file)
 	    return true;
     }
     if (magic == BINARY_MAGIC_BNS) {
-	    std::cout << "BNS detected\n";
-
 	    format = FORMAT_BNS;
 
 	    in.seekg(start, std::istream::beg);
 
 	    BNS bns_file;
-
-	    std::cout << "Opening BNS...\n";
 	    bns_file.Open(in);
-	    std::cout << "BNS opened\n";
 
 	    sampleCount = bns_file.GetSamplesCount();
 	    channels    = bns_file.GetChannelsCount();
@@ -433,57 +423,18 @@ bool Sound::Load(std::istream& file)
 	    loop_end    = sampleCount;
     	has_loop   = bns_file.GetLoop();
 
-    	std::cout << "Expected PCM samples: "
-			<< bns_file.GetDecodedSampleCount()
-			<< "\n";
-
-    	std::cout << "BNS header samples: "
-				  << sampleCount * channels
-				  << "\n";
-
-	    std::cout
-			    << "samples=" << sampleCount
-			    << " channels=" << channels
-			    << " rate=" << sampleRate
-			    << "\n";
-
-	    //if (sampleCount == 0 || channels == 0)
-	    //{
-		//    std::cout << "Invalid BNS\n";
-		//    return false;
-	    //}
-
-	    std::cout << "Resizing PCM buffer\n";
 	    samples.resize(sampleCount * channels);
 
-	    std::cout << "Decoding PCM...\n";
 	    u32 written = bns_file.DecodeToPCM(samples.data());
-
-	    std::cout << "Allocated samples: " << samples.size() << "\n";
-	    std::cout << "Written samples: " << written << "\n";
 
 	    samples.resize(written);
 
-    	std::cout << "Decoded samples: " << samples.size() << "\n";
-    	std::cout << "Channels: " << channels << "\n";
-    	std::cout << "Remainder: " << (samples.size() % channels) << "\n";
-
-	    std::cout << "Decode complete\n";
-
 	    this->channels = channels;
-
-	    std::cout << "channels assigned\n";
-
 	    this->sampleRate = sampleRate;
-
-	    std::cout << "rate assigned\n";
-
-	    std::cout << "Returning true from Sound::Load\n";
 
 	    return true;
     }
 
-    std::cout << "Unknown format\n";
     return false;
 }
 
@@ -525,7 +476,6 @@ void Sound::WritePCMAsWAV(const std::string& path,
 
 
 void Sound::WriteWAV(const std::string& path) {
-    //std::cout << "called" << std::flush;
     if (format == FORMAT_WAV) {
         std::ofstream out(path, std::ios::binary);
         out.write(reinterpret_cast<char *>(rawData.data()), rawData.size());
@@ -555,8 +505,6 @@ void Sound::WriteWAVLooped(const std::string& path, double seconds)
     const auto target_frames = static_cast<size_t>(seconds * sampleRate);
     const size_t target_samples = target_frames * channels;
 
-	// i guess homebrew channel is retarded or something because its the only test subject that has this fucking issue
-	// if anyone has a better solution to this pls fix my shit
 	if (samples.size() % channels != 0)
 		samples.resize((samples.size() / channels) * channels);
 

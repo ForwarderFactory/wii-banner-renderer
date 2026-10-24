@@ -69,13 +69,6 @@ Texture::~Texture()
 
 	file.seekg(header_size - 0xC, std::ios::cur);
 
-	// only support a single texture
-	//if (texture_count > 1) {
-	//	texture_count = 1;
-	//	std::cout << "texture count > 1\n";
-	//}
-	std::cout << "Texture count: " << texture_count << std::endl;
-
 	std::streamoff next_offset = file.tellg();
 
 	while (texture_count--)
