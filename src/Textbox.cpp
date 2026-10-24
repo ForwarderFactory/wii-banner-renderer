@@ -72,6 +72,7 @@ void Textbox::Load(std::istream& file)
 		text.push_back(static_cast<char16_t>(character));
 	}
 
+	// more debugging
 	if (std::getenv("WB_TEXT_DEBUG")) {
 		bool has_control = false;
 		for (char16_t c : text)

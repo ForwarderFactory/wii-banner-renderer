@@ -70,6 +70,10 @@ public:
 	void SetPositionAdjust(bool adjust) { SetBit(flags, FLAG_POSITION_ADJUST, !adjust); }
 
 	bool GetHide() const { return hide; }
+
+	// debugging
+	uint8_t GetFlags() const { return flags; }
+	uint8_t GetOriginRaw() const { return origin; }
 	void SetHide(bool _hide) { hide = _hide; }
 
 	uint8_t GetOriginX() const { return origin % 3; }

@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -94,6 +95,8 @@ void Layout::Load(std::istream& file)
 	Pane* last_pane = nullptr;
 	std::stack<std::vector<Pane*>*> pane_stack;
 	pane_stack.push(&panes);
+
+	std::stack<Pane*> pane_owner_stack;
 
 	auto const add_pane = [&](Pane* pane)
 	{
@@ -190,12 +193,20 @@ void Layout::Load(std::istream& file)
 		else if (magic == BINARY_MAGIC_PANE_PUSH)
 		{
 			if (last_pane)
+			{
 				pane_stack.push(&last_pane->panes);
+				pane_owner_stack.push(last_pane);
+			}
 		}
 		else if (magic == BINARY_MAGIC_PANE_POP)
 		{
 			if (pane_stack.size() > 1)
+			{
 				pane_stack.pop();
+
+				last_pane = pane_owner_stack.top();
+				pane_owner_stack.pop();
+			}
 		}
 		else if (magic == Layout::Group::BINARY_MAGIC)
 		{
@@ -268,6 +279,64 @@ void Layout::Render(float zoom, uint8_t render_alpha, bool widescreen) const {
 	}
 
 	glPopMatrix();
+}
+
+void Layout::DebugTrace(const char* names) const
+{
+	if (!names)
+		return;
+
+	std::set<std::string> wanted;
+	{
+		std::string current;
+		for (const char* c = names;; ++c)
+		{
+			if (*c == ',' || *c == '\0')
+			{
+				if (!current.empty())
+					wanted.insert(current);
+				current.clear();
+				if (*c == '\0')
+					break;
+			}
+			else
+			{
+				current.push_back(*c);
+			}
+		}
+	}
+
+	// absolute position is approximate (ignores rotation and widescreen scale)
+	std::function<void(const PaneList&, float, float, float, float)> walk =
+		[&](const PaneList& list, float px, float py, float psx, float psy)
+	{
+		for (Pane* pane : list)
+		{
+			const float ax = px + psx * pane->GetTranslate().x;
+			const float ay = py + psy * pane->GetTranslate().y;
+
+			if (wanted.count(pane->GetName()))
+			{
+				std::printf("[trace] frame %d '%s' local=(%.1f,%.1f) "
+					"scale=(%.2f,%.2f) abs=(%.1f,%.1f) v=%d z=%.1f "
+					"rot=(%.1f,%.1f,%.1f) size=%.1fx%.1f flags=0x%02X "
+					"origin_raw=%d\n",
+					static_cast<int>(frame_current), pane->GetName().c_str(),
+					pane->GetTranslate().x, pane->GetTranslate().y,
+					pane->GetScale().x, pane->GetScale().y, ax, ay,
+					pane->GetVisible() ? 1 : 0, pane->GetTranslate().z,
+					pane->GetRotate().x, pane->GetRotate().y, pane->GetRotate().z,
+					pane->GetWidth(), pane->GetHeight(),
+					static_cast<unsigned>(pane->GetFlags()),
+					static_cast<int>(pane->GetOriginRaw()));
+			}
+
+			walk(pane->panes, ax, ay, psx * pane->GetScale().x,
+				psy * pane->GetScale().y);
+		}
+	};
+
+	walk(panes, 0.f, 0.f, 1.f, 1.f);
 }
 
 void Layout::SetFrame(FrameNumber frame_number)
@@ -347,6 +416,7 @@ namespace
 
 void Layout::SetLanguage(const std::string& language)
 {
+	/// some debugging possible here
 	if (std::getenv("WB_LAYOUT_DEBUG"))
 	{
 		std::printf("[layout] language '%s', group tree:\n", language.c_str());
@@ -358,9 +428,14 @@ void Layout::SetLanguage(const std::string& language)
 		{
 			for (Pane* pane : list)
 			{
-				std::printf("[layout] %*s'%s' v=%d h=%d\n", depth * 2, "",
+				std::printf("[layout] %*s'%s' v=%d h=%d t=(%.1f,%.1f) "
+					"s=(%.2f,%.2f) size=%.1fx%.1f origin=(%d,%d)\n", depth * 2, "",
 					pane->GetName().c_str(),
-					pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0);
+					pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0,
+					pane->GetTranslate().x, pane->GetTranslate().y,
+					pane->GetScale().x, pane->GetScale().y,
+					pane->GetWidth(), pane->GetHeight(),
+					pane->GetOriginX(), pane->GetOriginY());
 				dump_panes(pane->panes, depth + 1);
 			}
 		};
@@ -377,6 +452,7 @@ void Layout::SetLanguage(const std::string& language)
 			found_language_group = true;
 	}
 
+	// hide panes of non-matching languages
 	for (const LanguageGroup& entry : language_groups)
 	{
 		if (entry.name == language)
@@ -450,8 +526,6 @@ void Layout::SetLanguage(const std::string& language)
 		}
 	}
 
-	/* gross fallback, i imagine nintendo had proprietary code that actually
-	 * handles this properly, but alas, this appears to work. */
 	static const std::map<std::string, std::string> legacy_language_panes = {
 		{"JPN", "font_j"},
 		{"ENG", "font_e"},

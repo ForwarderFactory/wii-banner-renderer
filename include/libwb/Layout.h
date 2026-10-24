@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -58,6 +59,9 @@ public:
 	//void Render(float aspect_ratio, float zoom = 1.f) const;
 	void Render(float zoom, uint8_t render_alpha, bool widescreen) const;
 
+	// debugging aid: prints the state of the named panes (comma separated)
+	void DebugTrace(const char* names) const;
+
 
 	[[nodiscard]] FrameNumber GetFrame() const { return frame_current; }
 	void SetFrame(FrameNumber frame_number);
@@ -72,7 +76,7 @@ public:
 	[[nodiscard]] float GetHeight() const { return height; }
 	void SetHeight(float _height) { height = _height; }
 
-	//bool GetCentered() const { return !!centered; }
+	[[nodiscard]] bool GetCentered() const { return !!centered; }
 
 	void SetLanguage(const std::string& language);
 
