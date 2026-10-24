@@ -1006,7 +1006,6 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		std::cout << "Failed to compile fragment shader\n";
 	}
 	}
-	}
 
 	// create program, attach shaders
 	program = glCreateProgram();
