@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(WB_BUILD_PLAYER ON)
+set(WB_BUILD_CLI ON)
 
 add_library(wb STATIC
         src/old/Blob.cpp
@@ -49,15 +50,6 @@ target_include_directories(wb
 )
 
 find_package(OpenGL REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(FFMPEG REQUIRED
-        libavformat
-        libavcodec
-        libavutil
-        libswscale
-        libswresample
-)
 
 include(FetchContent)
 
@@ -170,25 +162,36 @@ install(
 )
 
 ## command line utility
+if (WB_BUILD_CLI)
+        find_package(PkgConfig REQUIRED)
 
-add_executable(wbr
-        src/cli/Main.cpp
-        src/cli/VideoEncoder.cpp
-)
+        pkg_check_modules(FFMPEG REQUIRED
+                libavformat
+                libavcodec
+                libavutil
+                libswscale
+                libswresample
+        )
+        add_executable(wbr
+                src/cli/Main.cpp
+                src/cli/VideoEncoder.cpp
+        )
 
-target_include_directories(wbr PRIVATE include/cli)
+        target_include_directories(wbr PRIVATE include/cli)
 
-target_link_libraries(wbr
-        PRIVATE
-        wb::wb
-        ${FFMPEG_LIBRARIES}
-)
+        target_link_libraries(wbr
+                PRIVATE
+                wb::wb
+                ${FFMPEG_LIBRARIES}
+        )
 
-install(
-        TARGETS wbr
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+        install(
+                TARGETS wbr
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+endif()
 
+# player
 if (WB_BUILD_PLAYER)
     add_executable(wbp src/player/Main.cpp)
 
