@@ -67,18 +67,25 @@ constexpr std::array<Point, 4> g_icon_points = {{
     {1060, 0}, {1060, 520}, {1833, 0}, {1833, 520}
 }};
 
-static int upload_texture(const std::vector<unsigned char>& rgba, int w, int h) {
-    if (w <= 0 || h <= 0 || rgba.empty()) return 0;
+static GLuint upload_texture(const std::vector<unsigned char>& rgba, int w, int h) {
+    if (w <= 0 || h <= 0 || rgba.empty())
+        return 0;
 
-    int tex = 0; /* again should this be glint */
+    GLuint tex = 0;
 
-    glGenTextures(1, reinterpret_cast<GLuint *>(&tex));
+    glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
+
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, rgba.data()
+    );
+
     glBindTexture(GL_TEXTURE_2D, 0);
 
     return tex;
@@ -137,10 +144,13 @@ static void fit_rect(float box_w, float box_h, float content_aspect, float& out_
 
 struct IconProcess {
     WiiBanner::Layout* layout = nullptr;
-    int texture = 0; // should we use GLuint? seems useless on modern computers
+    GLuint texture = 0;
 
     void destroy_texture() {
-        if (texture) { glDeleteTextures(1, reinterpret_cast<GLuint *>(&texture)); texture = 0; }
+        if (texture) {
+            glDeleteTextures(1, &texture);
+            texture = 0;
+        }
     }
 };
 
@@ -241,10 +251,17 @@ static std::deque<Banner> scan_channels(const std::filesystem::path& dir, const 
     return channels;
 }
 
+enum class RenderPriority : int {
+    Thumbnail = 0,
+    Hovered = 1,
+    Banner = 2
+};
+
 struct Render {
     IconProcess* visual = nullptr;
     Rect crop{};
     bool advance = false;
+    RenderPriority priority = RenderPriority::Thumbnail;
 };
 
 struct RenderHandle {
@@ -262,8 +279,34 @@ struct RenderQueue {
     std::atomic<bool> stop{false};
 
     void submit(const Render& render) {
+        if (!render.visual)
+            return;
+
         std::lock_guard<std::mutex> lk(mtx);
-        pending[render.visual] = render;
+
+        auto it = pending.find(render.visual);
+
+        if (it != pending.end()) {
+            if (static_cast<int>(render.priority) >
+                static_cast<int>(it->second.priority)) {
+                it->second = render;
+                } else if (render.advance) {
+                    it->second.advance = true;
+                }
+
+            cv.notify_one();
+            return;
+        }
+
+        if (in_flight.load() == render.visual)
+            return;
+
+        for (const auto& result : ready) {
+            if (result.visual == render.visual)
+                return;
+        }
+
+        pending.emplace(render.visual, render);
         cv.notify_one();
     }
 
@@ -294,14 +337,20 @@ static void render_worker(RenderQueue& queue) {
             continue;
         }
 
-        auto it = queue.pending.begin();
+        auto it = std::max_element(
+            queue.pending.begin(),
+            queue.pending.end(),
+            [](const auto& a, const auto& b) {
+                return static_cast<int>(a.second.priority) <
+                       static_cast<int>(b.second.priority);
+            }
+        );
 
         Render render = it->second;
         queue.pending.erase(it);
 
-        lk.unlock();
-
         queue.in_flight.store(render.visual);
+        lk.unlock();
 
         if (render.visual && render.visual->layout) {
             canvas_renderer.BeginFrame();
@@ -319,10 +368,11 @@ static void render_worker(RenderQueue& queue) {
             {
                 std::lock_guard<std::mutex> rlk(queue.mtx);
                 queue.ready.push_back(std::move(outcome));
+                queue.in_flight.store(nullptr);
             }
-        }
 
-        queue.in_flight.store(nullptr);
+            queue.cv.notify_all();
+        }
 
         lk.lock();
     }
@@ -363,6 +413,8 @@ static void SDLCALL on_files_selected(void* userdata, const char* const* filelis
     for (int i = 0; filelist[i] != nullptr; ++i)
         pending->paths.emplace_back(filelist[i]);
 }
+
+int hovered_index = -1;
 
 int main(int argc, char** argv) {
     std::filesystem::path channel_dir{};
@@ -563,7 +615,7 @@ int main(int argc, char** argv) {
     while (running) {
         constexpr int cell_padding = 20;
         constexpr int cell_size = 160;
-        constexpr int frame_rate = 60;
+        constexpr int frame_rate = 144; // this is hacky
         constexpr int extra_tiles = 1;
 
         int cols = std::max(1, win_w / (cell_size + cell_padding));
@@ -629,6 +681,35 @@ int main(int argc, char** argv) {
                     }
                 }
                 break;
+            case SDL_EVENT_MOUSE_MOTION:
+                if (mode == ViewMode::GRID) {
+                    const int mx = static_cast<int>(e.motion.x);
+                    const int my = static_cast<int>(e.motion.y) + scroll_y;
+
+                    const int stride = cell_size + cell_padding;
+
+                    const int col = (mx - cell_padding / 2) / stride;
+                    const int row = (my - cell_padding / 2) / stride;
+
+                    hovered_index = -1;
+
+                    if (mx >= cell_padding / 2 &&
+                        my >= cell_padding / 2 &&
+                        col >= 0 && col < cols) {
+
+                        const int cell_x = col * stride + cell_padding / 2;
+                        const int cell_y = row * stride + cell_padding / 2;
+
+                        if (mx < cell_x + cell_size && my < cell_y + cell_size) {
+                            const int index = row * cols + col;
+
+                            if (index >= 0 && index < total_slots) {
+                                hovered_index = selected_index = index;
+                            }
+                        }
+                    }
+                }
+                break;
             case SDL_EVENT_MOUSE_WHEEL:
                 if (mode == ViewMode::GRID)
                     scroll_y = std::max(0, scroll_y - static_cast<int>(e.wheel.y * 40));
@@ -670,18 +751,39 @@ int main(int argc, char** argv) {
 
         if (mode == ViewMode::GRID) {
             for (size_t i = 0; i < channels.size(); ++i) {
-                int row = static_cast<int>(i) / cols;
+                const int row = static_cast<int>(i) / cols;
 
-                float y = row * (cell_size + cell_padding) + cell_padding / 2.f - scroll_y;
+                const float y =
+                    row * (cell_size + cell_padding)
+                    + cell_padding / 2.f
+                    - scroll_y;
 
                 if (y + cell_size < 0 || y > win_h)
                     continue;
 
+                IconProcess& icon = channels[i].icon;
 
-                queue.submit(Render{&channels[i].icon, icon_crop, /*advance=*/true});
+
+                const int animated_index = hovered_index >= 0 ? hovered_index : selected_index;
+
+                const bool animate = static_cast<int>(i) == animated_index;
+
+                if (animate || icon.texture == 0) {
+                    queue.submit(Render{
+                        &icon,
+                        icon_crop,
+                        animate,
+                        animate ? RenderPriority::Hovered
+                                : RenderPriority::Thumbnail
+                    });
+                }
             }
         } else if (active_banner_visual.layout) {
-            queue.submit(Render{&active_banner_visual, banner_crop, /*advance=*/true});
+            queue.submit(Render{
+                &active_banner_visual,
+                banner_crop,
+                true
+            });
         }
 
         for (RenderHandle& outcome : queue.drain_ready()) {
