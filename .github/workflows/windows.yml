@@ -1,3 +1,4 @@
+
 name: Build Windows Release
 
 on:
@@ -31,21 +32,47 @@ jobs:
         mkdir -p build
         cd build
         cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-        cmake --build .
-        
-        for dll in $(ldd wbr.exe | awk '/mingw|ucrt|clang/ { print $3 }' | sort -u); do
-          if [ -n "$dll" ] && [ -f "$dll" ]; then
-            cp "$dll" .
+        cmake --build . --parallel
+
+        for exe in wbr.exe wbp.exe; do
+          if [ ! -f "$exe" ]; then
+            echo "Error: $exe was not built"
+            exit 1
           fi
+
+          for dll in $(ldd "$exe" | awk '/mingw|ucrt|clang/ { print $3 }' | sort -u); do
+            if [ -n "$dll" ] && [ -f "$dll" ]; then
+              cp -n "$dll" .
+            fi
+          done
         done
 
-    - name: Create ZIP
-      shell: powershell
-      run: |
-        Compress-Archive -Path build\wbr.exe, build\wbp.exe, build\*.dll, build\libwb.a -DestinationPath release.zip
-
-    - name: Upload artifact
+    - name: Upload wbr
       uses: actions/upload-artifact@v4
       with:
-        name: windows-build
-        path: release.zip
+        name: wbr-windows-x64
+        path: |
+          build/wbr.exe
+          build/*.dll
+        if-no-files-found: error
+        compression-level: 0
+
+    - name: Upload wbp
+      uses: actions/upload-artifact@v4
+      with:
+        name: wbp-windows-x64
+        path: |
+          build/wbp.exe
+          build/*.dll
+        if-no-files-found: error
+        compression-level: 0
+
+    - name: Upload development library
+      uses: actions/upload-artifact@v4
+      with:
+        name: wb-library-windows-x64
+        path: |
+          build/libwb.a
+          include/
+        if-no-files-found: error
+        compression-level: 6
