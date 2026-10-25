@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -22,6 +23,8 @@ distribution.
 */
 
 #include <GL/glew.h>
+
+#include <cstdio>
 
 #include <libwb/Pane.h>
 #include <libwb/Layout.h>
@@ -134,7 +137,7 @@ void Pane::ProcessHermiteKey(const KeyType& type, float value)
 		// only alpha is supported for Panes afaict
 		if (0x10 == type.target)
 		{
-			alpha = (uint8_t)value;
+			alpha = ClampToByte(value);
 			return;
 		}
 	}
@@ -192,7 +195,24 @@ void Quad::Load(std::istream& file)
 		ReadBEArray(file, &tex_coords[0].coords->s, sizeof(TexCoords) / sizeof(float) * tex_coord_count);
 }
 
-	void Quad::Draw(const Resources& resources, uint8_t render_alpha) const
+void Quad::DebugPrintTexInfo(const Resources& resources) const
+{
+	std::printf("[trace]     material index %u, %zu texcoord set(s)\n",
+		static_cast<unsigned>(material_index), tex_coords.size());
+
+	for (size_t i = 0; i != tex_coords.size(); ++i)
+	{
+		const auto& c = tex_coords[i].coords;
+		std::printf("[trace]       texcoords[%zu] TL=(%.4f,%.4f) TR=(%.4f,%.4f) "
+			"BL=(%.4f,%.4f) BR=(%.4f,%.4f)\n", i, c[0].s, c[0].t, c[1].s,
+			c[1].t, c[2].s, c[2].t, c[3].s, c[3].t);
+	}
+
+	if (material_index < resources.materials.size())
+		resources.materials[material_index]->DebugPrintSrts();
+}
+
+void Quad::Draw(const Resources& resources, uint8_t render_alpha) const
 {
 	const Material* material = nullptr;
 
@@ -264,7 +284,7 @@ void Quad::ProcessHermiteKey(const KeyType& type, float value)
 		if (type.target < 0x10)
 		{
 			// vertex colors
-			(&vertex_colors->r)[type.target] = (uint8_t)value;
+			(&vertex_colors->r)[type.target] = ClampToByte(value);
 			return;
 		}
 	}

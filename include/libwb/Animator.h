@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -25,6 +26,7 @@ distribution.
 #define WII_BNR_ANIMATOR_H_
 
 #include <map>
+#include <tuple>
 #include <cstring>
 
 #include <libwb/Types.h>
@@ -56,7 +58,7 @@ struct KeyType
 
 	bool operator<(const KeyType& rhs) const
 	{
-		return memcmp(this, &rhs, sizeof(*this)) < 0;
+		return std::tie(type, index, target) < std::tie(rhs.type, rhs.index, rhs.target);
 	}
 
 	const AnimationType type;
@@ -91,9 +93,20 @@ public:
 
 	[[nodiscard]] float GetFrame(FrameNumber frame_number) const;
 
+	void DebugPrint() const;
+
 private:
 	std::multimap<FrameNumber, KeyData> keys;
 };
+
+inline uint8_t ClampToByte(float value)
+{
+	if (!(value > 0.f))
+		return 0;
+	if (value >= 255.f)
+		return 255;
+	return static_cast<uint8_t>(value);
+}
 
 class Animator : public Named
 {
@@ -107,6 +120,8 @@ public:
 	void LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamoff origin, uint8_t key_set);
 
 	virtual void SetFrame(FrameNumber frame, uint8_t key_set);
+
+	void DebugPrintKeys() const;
 
 protected:
 	Animator() = default;

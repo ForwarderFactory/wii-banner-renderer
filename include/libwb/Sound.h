@@ -34,10 +34,10 @@ namespace WiiBanner
 class Sound
 {
 	std::vector<uint8_t> rawData{};
-        std::vector<int16_t> samples{};
-        uint16_t channels = 0;
-        uint32_t sampleRate = 0;
-		uint32_t sampleCount = 0;
+	std::vector<int16_t> samples{};
+	uint16_t channels = 0;
+	uint32_t sampleRate = 0;
+	uint32_t sampleCount = 0;
 
 	uint32_t loop_start = 0;
 	uint32_t loop_end = 0;
@@ -56,6 +56,10 @@ public:
 	~Sound() = default;
 
 	bool Load(std::istream& file);
+
+	bool HasLoop() const;
+	[[nodiscard]] uint32_t GetLoopStart() const;
+	[[nodiscard]] uint32_t GetLoopEnd() const;
 
 	void WriteWAV(const std::string& path);
 	void WriteWAVLooped(const std::string& path, double seconds);

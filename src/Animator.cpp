@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -27,6 +28,8 @@ distribution.
 #include <libwb/Layout.h>
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 enum BinaryMagic : uint32_t {
 	BINARY_MAGIC_ANIMATION = MAKE_FOURCC('R', 'L', 'A', 'N'),
@@ -93,9 +96,7 @@ namespace WiiBanner {
 					std::string name;
 					std::getline(file, name, '\0'); // null-terminated string
 
-#ifdef WB_DEBUG
 					std::cout << "File: " << name << std::endl;
-#endif
 
 					layout.AddPalette(name, key_set);
 				}
@@ -122,11 +123,11 @@ namespace WiiBanner {
 					if (animator)
 						animator->LoadKeyFrames(file, tag_count, origin, key_set);
 				});
-			} else {
-#ifdef WB_DEBUG
+			}
+			else
+			{
 				std::cout << "UNKNOWN SECTION: ";
 				std::cout << magic << '\n';
-#endif
 			}
 		});
 
@@ -146,16 +147,31 @@ void Animator::LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamo
 
 		ReadOffsetList<uint32_t>(file, entry_count, frame_origin, [&]
 		{
+			const std::streamoff entry_start = file.tellg();
+
 			uint8_t index;
 			uint8_t target;
 			uint8_t data_type;
 			uint8_t pad;
 			uint16_t key_count;
 			uint16_t pad1;
-			uint32_t offset;	// TODO: handle this
+			uint32_t offset;
 
 			file >> BE >> index >> target >> data_type >> pad
 				>> key_count >> pad1 >> offset;
+
+			if (offset != 0 && offset != 12)
+			{
+				if (std::getenv("WB_LAYOUT_DEBUG"))
+				{
+					std::printf("[anim] '%s': key data offset %u instead of 12 "
+						"(target %d)\n", GetName().c_str(),
+						static_cast<unsigned>(offset), static_cast<int>(target));
+				}
+
+				file.seekg(entry_start + static_cast<std::streamoff>(offset),
+					std::ios::beg);
+			}
 
 			const KeyType frame_type(static_cast<AnimationType>(animation_type), index, target);
 
@@ -172,9 +188,7 @@ void Animator::LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamo
 				break;
 
 			default:
-#ifdef WB_DEBUG
 				std::cout << "UNKNOWN FRAME DATA TYPE!!\n";
-#endif
 				break;
 			}
 		});
@@ -289,6 +303,46 @@ float HermiteKeyHandler::GetFrame(FrameNumber frame_number) const {
 				next->second.slope * nf * (powf(t, 3) - powf(t, 2)) +
 				prev->second.value * (1 + (2 * powf(t, 3) - 3 * powf(t, 2))) +
 				next->second.value * (-2 * powf(t, 3) + 3 * powf(t, 2));
+	}
+}
+
+void HermiteKeyHandler::DebugPrint() const
+{
+	size_t shown = 0;
+	for (const auto& key : keys)
+	{
+		if (shown++ == 24)
+		{
+			std::printf(" ... (%zu keys total)", keys.size());
+			break;
+		}
+		std::printf(" %g:%g", static_cast<double>(key.first),
+			static_cast<double>(key.second.value));
+	}
+}
+
+void Animator::DebugPrintKeys() const
+{
+	for (int set = 0; set != 2; ++set)
+	{
+		for (const auto& track : keys[set].hermite_keys)
+		{
+			std::cout << "[keys] '" << GetName() << "' set " << set << " type "
+				<< FourCC(track.first.type) << " index "
+				<< static_cast<int>(track.first.index) << " target "
+				<< static_cast<int>(track.first.target) << ":";
+			track.second.DebugPrint();
+			std::cout << std::endl;
+		}
+
+		for (const auto& track : keys[set].step_keys)
+		{
+			std::cout << "[keys] '" << GetName() << "' set " << set << " type "
+				<< FourCC(track.first.type) << " index "
+				<< static_cast<int>(track.first.index) << " target "
+				<< static_cast<int>(track.first.target) << ": (step track)"
+				<< std::endl;
+		}
 	}
 }
 

@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -41,6 +42,8 @@ public:
 	{
 		NAME_LENGTH = 20
 	};
+
+	void DebugPrintSrts() const;
 
 	static constexpr uint32_t MAX_TEX_MAP = 8;
 	static constexpr uint32_t MAX_TEX_SRT = 10;
@@ -229,7 +232,7 @@ private:
 	};
 	std::vector<TevStage> tev_stages;
 
-	GXColor color{};	// material register color, used when a channel's matsrc is GX_SRC_REG
+	GXColor color{};
 
 	struct
 	{

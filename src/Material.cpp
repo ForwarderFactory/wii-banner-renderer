@@ -24,6 +24,12 @@ distribution.
 
 #include <GL/glew.h>
 
+#include <cstdio>
+#include <string>
+#include <set>
+#include <cstdlib>
+
+#include <algorithm>
 #include <cmath>
 
 #include <libwb/Material.h>
@@ -358,6 +364,19 @@ void Material::Apply(const Resources& resources) const
 		alpha_compare.op, alpha_compare.function >> 4, alpha_compare.ref1);
 
 	// blend mode
+	if (std::getenv("WB_LAYOUT_DEBUG"))
+	{
+		static std::set<std::string> printed;
+		if (printed.insert(GetName()).second)
+		{
+			std::printf("[blend] material '%s': type=%d src=%d dst=%d op=%d\n",
+				GetName().c_str(), static_cast<int>(blend_mode.type),
+				static_cast<int>(blend_mode.src_factor),
+				static_cast<int>(blend_mode.dst_factor),
+				static_cast<int>(blend_mode.logical_op));
+		}
+	}
+
 	GX_SetBlendMode(blend_mode.type, blend_mode.src_factor, blend_mode.dst_factor,
 		blend_mode.logical_op);
 
@@ -528,6 +547,28 @@ void Material::Apply(const Resources& resources) const
 	glColor4ubv(&color.r);
 }
 
+void Material::DebugPrintSrts() const
+{
+	std::printf("[trace]     material '%s': %zu texture srt(s)\n",
+		GetName().c_str(), texture_srts.size());
+
+	for (size_t i = 0; i != texture_srts.size(); ++i)
+	{
+		const auto& srt = texture_srts[i];
+		std::printf("[trace]       srt[%zu] translate=(%.4f,%.4f) rotate=%.2f "
+			"scale=(%.4f,%.4f)\n", i, srt.translate_s, srt.translate_t,
+			srt.rotate, srt.scale_s, srt.scale_t);
+	}
+
+	for (size_t i = 0; i != texture_coord_gens.size(); ++i)
+	{
+		const auto& tcg = texture_coord_gens[i];
+		std::printf("[trace]       texgen[%zu] type=%d src=%d mtx=%d\n", i,
+			static_cast<int>(tcg.tgen_type), static_cast<int>(tcg.tgen_src),
+			static_cast<int>(tcg.mtrx_src));
+	}
+}
+
 void Material::ProcessHermiteKey(const KeyType& type, float value) {
 	if (type.type == ANIMATION_TYPE_TEXTURE_SRT) {
 		if (type.target < 5 && type.index < texture_srts.size()) {
@@ -570,11 +611,13 @@ void Material::ProcessHermiteKey(const KeyType& type, float value) {
 		}
 	} else if (type.type == ANIMATION_TYPE_MATERIAL_COLOR) {
 		if (type.target < 4) {
-			(&color.r)[type.target] = (uint8_t)value;
+			(&color.r)[type.target] = ClampToByte(value);
 		} else if (type.target < 0x10) {
-			(&color_regs->r)[type.target - 4] = static_cast<uint16_t>(value);
+			// the colour registers are signed 10 bit values
+			(&color_regs->r)[type.target - 4] = static_cast<int16_t>(
+				std::clamp(value, -1024.f, 1023.f));
 		} else if (type.target < 0x20) {
-			(&color_constants->r)[type.target - 0x10] = (uint8_t)value;
+			(&color_constants->r)[type.target - 0x10] = ClampToByte(value);
 		}
 	} else {
 		Base::ProcessHermiteKey(type, value);

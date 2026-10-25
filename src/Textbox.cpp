@@ -72,8 +72,8 @@ void Textbox::Load(std::istream& file)
 		text.push_back(static_cast<char16_t>(character));
 	}
 
-	// more debugging
-	if (std::getenv("WB_TEXT_DEBUG")) {
+	if (std::getenv("WB_TEXT_DEBUG"))
+	{
 		bool has_control = false;
 		for (char16_t c : text)
 			has_control = has_control || (c < 0x20 && c != u'\n');
@@ -91,7 +91,8 @@ void Textbox::Load(std::istream& file)
 	}
 }
 
-namespace {
+namespace
+{
 	float NextTabStop(float position, float tab_stop)
 	{
 		if (!(tab_stop > 0.f))
@@ -99,33 +100,7 @@ namespace {
 		return (std::floor(position / tab_stop + 0.0001f) + 1.f) * tab_stop;
 	}
 
-	float MeasureLine(const Font& font, const std::u16string& line,
-		float scale_x, float space_char, float tab_stop)
-	{
-		float width = 0.f;
-		bool first = true;
-		for (char16_t character : line)
-		{
-			if (character == u'\t')
-			{
-				width = NextTabStop(width, tab_stop);
-				first = true;
-				continue;
-			}
-
-			Font::Glyph glyph;
-			if (!font.GetGlyph(static_cast<uint16_t>(character), glyph))
-				continue;
-			if (!first)
-				width += space_char;
-			width += glyph.widths.char_width * scale_x;
-			first = false;
-		}
-		return width;
-	}
-
-	std::u16string LayoutText(const Font& font, const std::u16string& source,
-		float scale_x, float space_char, float tab_stop, float box_width)
+	std::u16string LayoutText(const std::u16string& source)
 	{
 		std::u16string clean;
 		clean.reserve(source.size());
@@ -135,72 +110,12 @@ namespace {
 				clean.push_back(character);
 		}
 
-		if (!(box_width > 0.f))
-			return clean;
-
-		const float limit = box_width + 0.01f;
-		std::u16string out;
-		size_t pos = 0;
-
-		while (true)
-		{
-			size_t eol = clean.find(u'\n', pos);
-			if (eol == std::u16string::npos)
-				eol = clean.size();
-
-			std::u16string line;
-			bool have_word = false;
-			size_t p = pos;
-			while (true)
-			{
-				size_t space = clean.find(u' ', p);
-				if (space == std::u16string::npos || space > eol)
-					space = eol;
-
-				const std::u16string word = clean.substr(p, space - p);
-				if (!have_word)
-				{
-					line = word;
-					have_word = true;
-				}
-				else
-				{
-					std::u16string candidate = line;
-					candidate.push_back(u' ');
-					candidate += word;
-
-					if (!word.empty() && !line.empty() &&
-						MeasureLine(font, candidate, scale_x, space_char, tab_stop) > limit)
-					{
-						out += line;
-						out.push_back(u'\n');
-						line = word;
-					}
-					else
-					{
-						line = std::move(candidate);
-					}
-				}
-
-				if (space >= eol)
-					break;
-				p = space + 1;
-			}
-
-			out += line;
-			if (eol >= clean.size())
-				break;
-			out.push_back(u'\n');
-			pos = eol + 1;
-		}
-
-		return out;
+		return clean;
 	}
 
 	void SetupTextTevStages()
 	{
 		GX_SetTevOrder(0, GX_TEXCOORD0, 0, 4);
-
 		GX_SetTevColorIn(0, 2 /*C0*/, 4 /*C1*/, 8 /*TEXC*/, 0xf /*ZERO*/);
 		GX_SetTevAlphaIn(0, 1 /*A0*/, 2 /*A1*/, 4 /*TEXA*/, 0x7 /*ZERO*/);
 		GX_SetTevColorOp(0, 0, 0, 0, 1, 0);
@@ -218,6 +133,7 @@ namespace {
 		GX_SetTevIndirect(0, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
 		GX_SetTevIndirect(1, 0, GX_ITF_8, GX_ITB_NONE, GX_ITM_OFF, 0, 0, 0, 0, 0);
 
+		// we must call this last cuz this generates and compiles the shader
 		GX_SetNumTevStages(2);
 	}
 
@@ -250,8 +166,7 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 	const float tab_stop = 4.f * font_width;
 
-	const std::u16string laid_out = LayoutText(
-		*font, text, scale_x, space_char, tab_stop, GetWidth());
+	const std::u16string laid_out = LayoutText(text);
 	if (laid_out.empty())
 		return;
 
@@ -392,12 +307,12 @@ void Textbox::ProcessHermiteKey(const KeyType& type, float value)
 	{
 		if (type.target < 4)
 		{
-			(&colors[0].r)[type.target] = static_cast<uint8_t>(value);
+			(&colors[0].r)[type.target] = ClampToByte(value);
 			return;
 		}
 		if (type.target >= 8 && type.target < 12)
 		{
-			(&colors[1].r)[type.target - 8] = static_cast<uint8_t>(value);
+			(&colors[1].r)[type.target - 8] = ClampToByte(value);
 			return;
 		}
 	}

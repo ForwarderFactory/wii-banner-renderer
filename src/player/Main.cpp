@@ -146,6 +146,14 @@ struct IconProcess {
     WiiBanner::Layout* layout = nullptr;
     GLuint texture = 0;
 
+    uint64_t last_advance_ns = 0;
+    uint64_t accum_ns = 0;
+
+    void reset_timing() {
+        last_advance_ns = 0;
+        accum_ns = 0;
+    }
+
     void destroy_texture() {
         if (texture) {
             glDeleteTextures(1, &texture);
@@ -353,6 +361,28 @@ static void render_worker(RenderQueue& queue) {
         lk.unlock();
 
         if (render.visual && render.visual->layout) {
+            if (render.advance) {
+                constexpr uint64_t frame_ns = 1000000000ull / 60;
+                constexpr uint64_t resume_gap_ns = 250000000ull;
+                constexpr uint64_t max_catch_up = 10;
+
+                IconProcess* v = render.visual;
+                const uint64_t now = SDL_GetTicksNS();
+
+                if (v->last_advance_ns == 0 || now - v->last_advance_ns > resume_gap_ns)
+                    v->accum_ns = 0; // first frame, or resumed after a pause
+                else
+                    v->accum_ns += now - v->last_advance_ns;
+
+                v->last_advance_ns = now;
+
+                uint64_t frames = v->accum_ns / frame_ns;
+                v->accum_ns -= frames * frame_ns;
+
+                for (uint64_t i = 0; i < std::min(frames, max_catch_up); ++i)
+                    v->layout->AdvanceFrame();
+            }
+
             canvas_renderer.BeginFrame();
             render.visual->layout->Render(1.0f, 0xff, true);
             canvas_renderer.EndFrame();
@@ -362,8 +392,6 @@ static void render_worker(RenderQueue& queue) {
             outcome.pixels = canvas_renderer.GetFrameData(render.crop);
             outcome.width = render.crop.width;
             outcome.height = render.crop.height;
-
-            if (render.advance) render.visual->layout->AdvanceFrame();
 
             {
                 std::lock_guard<std::mutex> rlk(queue.mtx);
@@ -442,8 +470,9 @@ int main(int argc, char** argv) {
     int win_w = 1280;
     int win_h = 720;
 
-    SDL_Window* window = SDL_CreateWindow("Wii Banner Player", win_w, win_h,
+    SDL_Window* window = SDL_CreateWindow("Wii Banner Player by Forwarder Factory", win_w, win_h,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
         SDL_Quit();
@@ -498,7 +527,9 @@ int main(int argc, char** argv) {
     std::filesystem::path active_temp_wav;
     int active_channel_index = NO_CHANNEL_INDEX;
 
-    /* i hate this? */
+    /* i hate this?
+     * edit: why did i hate this? i dont even remember
+     */
     auto open_add_files_dialog = [&]() {
         static constexpr SDL_DialogFileFilter filters[] = {
             {"Wii banners", "app;bnr;wad"},
@@ -509,14 +540,23 @@ int main(int argc, char** argv) {
     };
 
     auto stop_audio = [&]() {
-        if (active_audio_track) { MIX_StopTrack(active_audio_track, 0); MIX_DestroyTrack(active_audio_track); active_audio_track = nullptr; }
-        if (active_audio) { MIX_DestroyAudio(active_audio); active_audio = nullptr; }
+        if (active_audio_track) {
+            MIX_StopTrack(active_audio_track, 0);
+            MIX_DestroyTrack(active_audio_track);
+            active_audio_track = nullptr;
+        }
+        if (active_audio) {
+            MIX_DestroyAudio(active_audio);
+            active_audio = nullptr;
+        }
     };
 
     auto launch_banner = [&](int index) {
         Banner& ch = channels[index];
 
         try {
+            stop_audio();
+
             ch.banner->LoadBanner();
 
             WiiBanner::Layout* layout = ch.banner->GetBanner();
@@ -529,36 +569,97 @@ int main(int argc, char** argv) {
 
             active_banner_visual.destroy_texture();
             active_banner_visual.layout = layout;
+            active_banner_visual.reset_timing();
 
             active_channel_index = index;
 
             ch.banner->LoadSound();
 
+            if (!ch.banner->GetSound())
+                std::cerr << "No sound could be loaded for " << ch.label << "\n";
+
             if (mixer && ch.banner->GetSound()) {
-                active_temp_wav = get_temp_dir() / ("wbr-menu-play-" + ch.label + ".wav");
+                active_temp_wav = get_temp_dir() / ("wbr-menu-play-" + std::to_string(index) + ".wav");
 
-                if (!std::filesystem::is_regular_file(active_temp_wav))
-                    ch.banner->GetSound()->WriteWAV(active_temp_wav.string());
+                std::error_code remove_ec;
+                std::filesystem::remove(active_temp_wav, remove_ec);
 
-                active_audio = MIX_LoadAudio(mixer, active_temp_wav.string().c_str(), true);
+                ch.banner->GetSound()->WriteWAV(active_temp_wav.string());
+
+                std::error_code size_ec;
+
+                const bool wrote = std::filesystem::is_regular_file(active_temp_wav)
+                && std::filesystem::file_size(active_temp_wav, size_ec) > 0
+                && !size_ec;
+
+                if (!wrote)
+                    std::cerr << "Failed to write the audio for " << ch.label << "\n";
+
+                active_audio = wrote
+                    ? MIX_LoadAudio(mixer, active_temp_wav.string().c_str(), true)
+                    : nullptr;
 
                 if (!active_audio) {
-                    std::cerr << "MIX_LoadAudio failed: " << SDL_GetError() << "\n";
+                    if (wrote)
+                        std::cerr << "MIX_LoadAudio failed: " << SDL_GetError() << "\n";
                 } else {
                     active_audio_track = MIX_CreateTrack(mixer);
+
                     if (!active_audio_track || !MIX_SetTrackAudio(active_audio_track, active_audio)) {
                         std::cerr << "MIX_CreateTrack/SetTrackAudio failed: " << SDL_GetError() << "\n";
+
                         if (active_audio_track) { MIX_DestroyTrack(active_audio_track); active_audio_track = nullptr; }
-                        MIX_DestroyAudio(active_audio);
-                        active_audio = nullptr;
-                    } else if (!MIX_PlayTrack(active_audio_track, 0)) {
-                        std::cerr << "MIX_PlayTrack failed: " << SDL_GetError() << "\n";
+                            MIX_DestroyAudio(active_audio);
+                            active_audio = nullptr;
+                        } else {
+                            SDL_PropertiesID local_props = SDL_CreateProperties();
+
+                            auto sound = ch.banner->GetSound();
+
+                            if (sound->HasLoop()) {
+                                SDL_PropertiesID track_props = MIX_GetTrackProperties(active_audio_track);
+
+                                int64_t mix_total_frames = SDL_GetNumberProperty(track_props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, 0);
+
+                                // hax since i think our parsing sucks sometimes and causes sdl to crash
+                                if (mix_total_frames <= 0 && sound->GetDurationSeconds() > 0) {
+                                    int mixer_sr = 48000;
+
+                                    SDL_GetNumberProperty(MIX_GetMixerProperties(mixer), MIX_PROP_MIXER_DEVICE_NUMBER, (int64_t)&mixer_sr);
+                                    mix_total_frames = static_cast<int64_t>(sound->GetDurationSeconds() * mixer_sr);
+                                }
+
+                                double wii_total_frames = sound->GetLoopEnd();
+                                double scale_factor = (wii_total_frames > 0) ? (static_cast<double>(mix_total_frames) / wii_total_frames) : 1.0;
+
+                                uint32_t start_val = static_cast<uint32_t>(sound->GetLoopStart() * scale_factor);
+                                uint32_t end_val   = static_cast<uint32_t>(mix_total_frames);
+
+                                if (end_val > start_val) {
+                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
+                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER, start_val);
+                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, end_val);
+                                } else {
+                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
+                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, -1);
+                                }
+                            } else {
+                                SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
+                                SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, -1);
+                            }
+
+                            if (!MIX_PlayTrack(active_audio_track, local_props)) {
+                                std::cerr << "MIX_PlayTrack failed: " << SDL_GetError() << "\n";
+                            }
+
+                            SDL_DestroyProperties(local_props);
+                        }
                     }
                 }
-            }
-
             mode = ViewMode::BANNER;
-        } catch (const std::exception&) {
+        } catch (const std::exception& ex) {
+            std::cerr << "Failed to open banner " << ch.label << ": " << ex.what() << "\n";
+
             stop_audio();
 
             queue.cancel_and_wait(&active_banner_visual);
@@ -567,6 +668,7 @@ int main(int argc, char** argv) {
             active_banner_visual.layout = nullptr;
         }
     };
+
 
     auto return_to_grid = [&]() {
         stop_audio();
@@ -608,14 +710,14 @@ int main(int argc, char** argv) {
         selected_index = index;
     };
 
-    uint64_t last_frame_ms = SDL_GetTicks();
+    uint64_t last_frame_ns = SDL_GetTicksNS();
 
     bool running = true;
 
     while (running) {
         constexpr int cell_padding = 20;
         constexpr int cell_size = 160;
-        constexpr int frame_rate = 144; // this is hacky
+        constexpr int frame_rate = 60;
         constexpr int extra_tiles = 1;
 
         int cols = std::max(1, win_w / (cell_size + cell_padding));
@@ -749,6 +851,17 @@ int main(int argc, char** argv) {
             }
         }
 
+        for (RenderHandle& outcome : queue.drain_ready()) {
+            IconProcess* v = outcome.visual;
+
+            if (v->texture == 0) {
+                v->texture = upload_texture(outcome.pixels, outcome.width, outcome.height);
+                continue;
+            }
+
+            update_texture(v->texture, outcome.pixels, outcome.width, outcome.height);
+        }
+
         if (mode == ViewMode::GRID) {
             for (size_t i = 0; i < channels.size(); ++i) {
                 const int row = static_cast<int>(i) / cols;
@@ -784,17 +897,6 @@ int main(int argc, char** argv) {
                 banner_crop,
                 true
             });
-        }
-
-        for (RenderHandle& outcome : queue.drain_ready()) {
-            IconProcess* v = outcome.visual;
-
-            if (v->texture == 0) {
-                v->texture = upload_texture(outcome.pixels, outcome.width, outcome.height);
-                continue;
-            }
-
-            update_texture(v->texture, outcome.pixels, outcome.width, outcome.height);
         }
 
         glViewport(0, 0, win_w, win_h);
@@ -857,15 +959,14 @@ int main(int argc, char** argv) {
 
         SDL_GL_SwapWindow(window);
 
-        uint64_t now = SDL_GetTicks();
-        uint64_t elapsed = now - last_frame_ms;
-        
-        constexpr uint64_t target = 1000 / frame_rate;
-        
-        if (elapsed < target)
-            SDL_Delay(static_cast<Uint32>(target - elapsed));
+        // 1000 / 60 in whole milliseconds is 16, i.e. 62.5 fps, so work in ns
+        constexpr uint64_t target_ns = 1000000000ull / frame_rate;
+        const uint64_t elapsed_ns = SDL_GetTicksNS() - last_frame_ns;
 
-        last_frame_ms = SDL_GetTicks();
+        if (elapsed_ns < target_ns)
+            SDL_DelayPrecise(target_ns - elapsed_ns);
+
+        last_frame_ns = SDL_GetTicksNS();
     }
 
     queue.stop.store(true);

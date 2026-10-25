@@ -92,6 +92,8 @@ void Layout::Load(std::istream& file)
 	std::stack<std::map<std::string, Group>*> group_stack;
 	group_stack.push(&groups);
 
+	std::stack<Group*> group_owner_stack;
+
 	Pane* last_pane = nullptr;
 	std::stack<std::vector<Pane*>*> pane_stack;
 	pane_stack.push(&panes);
@@ -163,6 +165,8 @@ void Layout::Load(std::istream& file)
 				mat->Load(file);
 				resources.materials.push_back(mat);
 			});
+
+			std::cout << "Loaded " << resources.materials.size() << " Materials\n";
 		}
 		else if (magic == Pane::BINARY_MAGIC)
 		{
@@ -220,12 +224,20 @@ void Layout::Load(std::istream& file)
 		else if (magic == BINARY_MAGIC_GROUP_PUSH)
 		{
 			if (last_group)
+			{
 				group_stack.push(&last_group->groups);
+				group_owner_stack.push(last_group);
+			}
 		}
 		else if (magic == BINARY_MAGIC_GROUP_POP)
 		{
 			if (group_stack.size() > 1)
+			{
 				group_stack.pop();
+
+				last_group = group_owner_stack.top();
+				group_owner_stack.pop();
+			}
 		}
 		else
 		{
@@ -275,6 +287,34 @@ void Layout::Render(float zoom, uint8_t render_alpha, bool widescreen) const {
 	glPopMatrix();
 }
 
+void Layout::DebugDumpAll() const
+{
+	std::function<void(const PaneList&, int)> walk =
+		[&](const PaneList& list, int depth)
+	{
+		for (Pane* pane : list)
+		{
+			std::printf("[dump] %*s'%s' v=%d h=%d alpha=%d flags=0x%02X "
+				"t=(%.1f,%.1f) s=(%.2f,%.2f) size=%.1fx%.1f origin=%d\n",
+				depth * 2, "", pane->GetName().c_str(),
+				pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0,
+				static_cast<int>(pane->GetAlpha()),
+				static_cast<unsigned>(pane->GetFlags()),
+				pane->GetTranslate().x, pane->GetTranslate().y,
+				pane->GetScale().x, pane->GetScale().y,
+				pane->GetWidth(), pane->GetHeight(),
+				static_cast<int>(pane->GetOriginRaw()));
+			pane->DebugPrintKeys();
+			walk(pane->panes, depth + 1);
+		}
+	};
+
+	walk(panes, 0);
+
+	for (const Material* material : resources.materials)
+		material->DebugPrintKeys();
+}
+
 void Layout::DebugTrace(const char* names) const
 {
 	if (!names)
@@ -300,7 +340,6 @@ void Layout::DebugTrace(const char* names) const
 		}
 	}
 
-	// absolute position is approximate (ignores rotation and widescreen scale)
 	std::function<void(const PaneList&, float, float, float, float)> walk =
 		[&](const PaneList& list, float px, float py, float psx, float psy)
 	{
@@ -323,6 +362,16 @@ void Layout::DebugTrace(const char* names) const
 					pane->GetWidth(), pane->GetHeight(),
 					static_cast<unsigned>(pane->GetFlags()),
 					static_cast<int>(pane->GetOriginRaw()));
+			}
+
+			if (wanted.count(pane->GetName()))
+			{
+				if (const Quad* const quad = dynamic_cast<const Quad*>(pane))
+					quad->DebugPrintTexInfo(resources);
+
+				static std::map<const Pane*, int> times_seen;
+				if (++times_seen[pane] == 2)
+					pane->DebugPrintKeys();
 			}
 
 			walk(pane->panes, ax, ay, psx * pane->GetScale().x,
@@ -421,7 +470,6 @@ namespace
 
 void Layout::SetLanguage(const std::string& language)
 {
-	/// some debugging possible here
 	if (std::getenv("WB_LAYOUT_DEBUG"))
 	{
 		std::printf("[layout] language '%s', group tree:\n", language.c_str());
@@ -578,19 +626,31 @@ Texture* Layout::FindTexture(const std::string& find_name) {
 }
 
 void Layout::AddPalette(const std::string& name, uint8_t key_set) {
+	std::cout << "AddPalette: " << name << "\n";
+
 	if (resources.palettes.size() <= key_set)
 		resources.palettes.resize(key_set + 1);
 
 	resources.palettes.at(key_set).push_back(name);
 
-	if (FindTexture(name)) {
+	if (FindTexture(name))
+	{
+		std::cout << "already exists\n";
 		return;
 	}
 
 	auto* texture = new Texture;
 	texture->SetName(name);
 
+	std::cout << "Creating texture "
+		  << texture
+		  << " name="
+		  << texture->GetName()
+		  << "\n";
+
 	resources.textures.push_back(texture);
+
+	std::cout << "added texture: " << texture->GetName() << "\n";
 }
 
 Pane* Layout::FindPane(const std::string& find_name)

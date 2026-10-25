@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -71,7 +72,7 @@ public:
 
 	bool GetHide() const { return hide; }
 
-	// debugging
+	// debugging accessors
 	uint8_t GetFlags() const { return flags; }
 	uint8_t GetOriginRaw() const { return origin; }
 	void SetHide(bool _hide) { hide = _hide; }
@@ -137,6 +138,8 @@ public:
 	typedef Pane Base;
 
 	void Load(std::istream& file);
+
+	void DebugPrintTexInfo(const Resources& resources) const;
 
 protected:
 	Quad() {}

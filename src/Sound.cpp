@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -22,6 +23,7 @@ distribution.
 */
 
 #include <iostream>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 
@@ -358,6 +360,9 @@ u32 DecodeToPCM(s16* pcm)
 			if (chunkSize % 2 == 1) offset++;
 		}
 
+		if (dataPtr && dataPtr + dataSize > data + size)
+			dataSize = static_cast<uint32_t>((data + size) - dataPtr);
+
 		if (!dataPtr || dataSize == 0 || sampleRate == 0 || channels == 0)
 			return false;
 
@@ -388,33 +393,48 @@ bool Sound::Load(std::istream& file)
     in >> magic;
 
     if (magic == BINARY_MAGIC_WAV) {
+        std::cout << "WAV detected\n";
+
         in >> LE >> file_len;
         in.seekg(start, std::istream::beg);
 
-        rawData.resize(file_len);
-        in.read(reinterpret_cast<char *>(rawData.data()), file_len);
+        const size_t total_len = static_cast<size_t>(file_len) + 8;
+        rawData.resize(total_len);
+        in.read(reinterpret_cast<char *>(rawData.data()), total_len);
+        rawData.resize(static_cast<size_t>(in.gcount()));
 
         format = FORMAT_WAV;
 
     	return ParseWAV();
     }
-    if (magic == BINARY_MAGIC_AIFF) {
+    if (magic == BINARY_MAGIC_AIFF)
+    {
+	    std::cout << "AIFF detected\n";
+
 	    in >> BE >> file_len;
 	    in.seekg(start, std::istream::beg);
 
-	    rawData.resize(file_len);
-	    in.read(reinterpret_cast<char *>(rawData.data()), file_len);
+	    // the FORM size does not count the 8 byte header itself
+	    const size_t total_len = static_cast<size_t>(file_len) + 8;
+	    rawData.resize(total_len);
+	    in.read(reinterpret_cast<char *>(rawData.data()), total_len);
+	    rawData.resize(static_cast<size_t>(in.gcount()));
 
 	    format = FORMAT_AIFF;
 	    return true;
     }
     if (magic == BINARY_MAGIC_BNS) {
+	    std::cout << "BNS detected\n";
+
 	    format = FORMAT_BNS;
 
 	    in.seekg(start, std::istream::beg);
 
 	    BNS bns_file;
+
+	    std::cout << "Opening BNS...\n";
 	    bns_file.Open(in);
+	    std::cout << "BNS opened\n";
 
 	    sampleCount = bns_file.GetSamplesCount();
 	    channels    = bns_file.GetChannelsCount();
@@ -423,25 +443,73 @@ bool Sound::Load(std::istream& file)
 	    loop_end    = sampleCount;
     	has_loop   = bns_file.GetLoop();
 
+    	std::cout << "Expected PCM samples: "
+			<< bns_file.GetDecodedSampleCount()
+			<< "\n";
+
+    	std::cout << "BNS header samples: "
+				  << sampleCount * channels
+				  << "\n";
+
+	    std::cout
+			    << "samples=" << sampleCount
+			    << " channels=" << channels
+			    << " rate=" << sampleRate
+			    << "\n";
+
+	    std::cout << "Resizing PCM buffer\n";
 	    samples.resize(sampleCount * channels);
 
+	    std::cout << "Decoding PCM...\n";
 	    u32 written = bns_file.DecodeToPCM(samples.data());
 
-	    samples.resize(written);
+	    std::cout << "Allocated samples: " << samples.size() << "\n";
+	    std::cout << "Written samples: " << written << "\n";
+
+	    samples.resize(std::min<size_t>(written, samples.size()));
+
+	    if (channels != 0)
+		    samples.resize((samples.size() / channels) * channels);
+
+    	std::cout << "Decoded samples: " << samples.size() << "\n";
+    	std::cout << "Channels: " << channels << "\n";
+    	std::cout << "Remainder: " << (samples.size() % channels) << "\n";
+
+	    std::cout << "Decode complete\n";
 
 	    this->channels = channels;
+
+	    std::cout << "channels assigned\n";
+
 	    this->sampleRate = sampleRate;
+
+	    std::cout << "rate assigned\n";
+
+	    std::cout << "Returning true from Sound::Load\n";
 
 	    return true;
     }
 
+    std::cout << "Unknown format\n";
     return false;
 }
 
+bool Sound::HasLoop() const {
+	return has_loop;
+}
+
+uint32_t Sound::GetLoopStart() const {
+	return loop_start;
+}
+
+uint32_t Sound::GetLoopEnd() const {
+	return loop_end;
+}
+
 void Sound::WritePCMAsWAV(const std::string& path,
-                   const std::vector<int16_t>& samples,
-                   uint16_t channels,
-                   uint32_t sampleRate)
+                          const std::vector<int16_t>& samples,
+                          uint16_t channels,
+                          uint32_t sampleRate)
 {
     std::ofstream out(path, std::ios::binary);
 
@@ -476,15 +544,22 @@ void Sound::WritePCMAsWAV(const std::string& path,
 
 
 void Sound::WriteWAV(const std::string& path) {
+    //std::cout << "called" << std::flush;
     if (format == FORMAT_WAV) {
+        if (!samples.empty() && channels != 0 && sampleRate != 0) {
+            WritePCMAsWAV(path, samples, channels, sampleRate);
+            return;
+        }
+
         std::ofstream out(path, std::ios::binary);
         out.write(reinterpret_cast<char *>(rawData.data()), rawData.size());
         return;
     }
 
-    if (format == FORMAT_AIFF)
-    {
-        std::cout << "AIFF not converted yet\n";
+    if (format == FORMAT_AIFF) {
+    	// this is not wav but i guess we should write something anyway?
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<char *>(rawData.data()), rawData.size());
         return;
     }
 

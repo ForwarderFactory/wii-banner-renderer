@@ -370,7 +370,22 @@ void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
 		glDisable(GL_BLEND);
 	}
 
-	static const GLenum blend_factors[] =
+	// In GX the factor values 2 and 3 mean different things depending on which
+	// side they are used on: SRCCLR/INVSRCCLR as the destination factor, but
+	// DSTCLR/INVDSTCLR as the source factor.
+	static const GLenum src_blend_factors[] =
+	{
+		GL_ZERO,
+		GL_ONE,
+		GL_DST_COLOR,
+		GL_ONE_MINUS_DST_COLOR,
+		GL_SRC_ALPHA,
+		GL_ONE_MINUS_SRC_ALPHA,
+		GL_DST_ALPHA,
+		GL_ONE_MINUS_DST_ALPHA,
+	};
+
+	static const GLenum dst_blend_factors[] =
 	{
 		GL_ZERO,
 		GL_ONE,
@@ -382,7 +397,7 @@ void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
 		GL_ONE_MINUS_DST_ALPHA,
 	};
 
-	glBlendFunc(blend_factors[src_fact & 0x7], blend_factors[dst_fact & 0x7]);
+	glBlendFunc(src_blend_factors[src_fact & 0x7], dst_blend_factors[dst_fact & 0x7]);
 
 	static const GLenum logic_ops[] =
 	{
@@ -407,10 +422,12 @@ void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
 	glLogicOp(logic_ops[op & 0xf]);
 }
 
+// TODO: incomplete
 void 	GX_SetAlphaCompare (u8 comp0, u8 ref0, u8 aop, u8 comp1, u8 ref1)
 {
 	static const GLenum alpha_funcs[] =
 	{
+		// GX order: NEVER, LESS, EQUAL, LEQUAL, GREATER, NEQUAL, GEQUAL, ALWAYS
 		GL_NEVER,
 		GL_LESS,
 		GL_EQUAL,
@@ -630,6 +647,8 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
+			std::cout << "GX_SetTexCoordGen: unsupported tgen_src " << (int)tg.tgen_src
+				<< " on texcoord " << i << ", falling back to gl_MultiTexCoord" << i << "\n";
 			src_vec = "vec4(gl_MultiTexCoord" + std::to_string(i) + ".st, 0.0, 1.0)";
 		}
 
@@ -646,8 +665,14 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
+			std::cout << "GX_SetTexCoordGen: unrecognized mtxsrc " << (int)tg.mtxsrc
+				<< " on texcoord " << i << ", using identity\n";
 			mtx_expr = "mat4(1.0)";
 		}
+
+		if (tg.tgen_typ != GX_TG_MTX2x4 && tg.tgen_typ != GX_TG_MTX3x4)
+			std::cout << "GX_SetTexCoordGen: unsupported tgen_typ " << (int)tg.tgen_typ
+				<< " on texcoord " << i << ", treating as GX_TG_MTX2x4\n";
 
 		vert_ss << "gl_TexCoord[" << i << "] = " << mtx_expr << " * " << src_vec << ";";
 	}
@@ -738,6 +763,13 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		const bool stage_has_ind = (stage.ind_mtxid >= GX_ITM_0 && stage.ind_mtxid <= GX_ITM_2)
 			&& (stage.ind_texid < ind_stages.size());
 
+		if (stage.ind_mtxid != GX_ITM_OFF && !stage_has_ind)
+		{
+			std::cout << "Material: unsupported indirect matrix id " << (int)stage.ind_mtxid
+				<< " (or indirect stage " << (int)stage.ind_texid << " not configured)"
+				<< ", disabling indirect for this stage\n";
+		}
+
 		if (stage_has_ind)
 		{
 			const IndStageProps& ind = ind_stages[stage.ind_texid];
@@ -776,6 +808,12 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 				frag_ss << "stage_ind_offset += ind_offset;";
 
 			frag_ss << "ind_offset = stage_ind_offset;";
+
+			if (stage.ind_wrap_s != GX_ITW_OFF || stage.ind_wrap_t != GX_ITW_OFF)
+			{
+				std::cout << "Material: indirect wrap modes (" << (int)stage.ind_wrap_s
+					<< ", " << (int)stage.ind_wrap_t << ") aren't emulated, ignoring\n";
+			}
 
 			if (stage.ind_alpha != GX_ITBA_OFF)
 			{
@@ -975,6 +1013,8 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	frag_ss << '}';
 
+	//std::cout << frag_ss.str() << '\n';
+
 	// create/compile fragment shader
 	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 
@@ -990,6 +1030,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	// check compile status of both shaders
 	{
+
 	GLint
 		vert_compiled = false,
 		frag_compiled = false;
@@ -999,12 +1040,15 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	if (!vert_compiled) {
 		std::cout << "Failed to compile vertex shader\n";
+		std::cout << vert_ss.str() << "\n";
 	}
 
 	if (!frag_compiled)
 	{
 		std::cout << "Failed to compile fragment shader\n";
+		std::cout << frag_ss.str() << "\n";
 	}
+
 	}
 
 	// create program, attach shaders
