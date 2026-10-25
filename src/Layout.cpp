@@ -339,7 +339,18 @@ void Layout::SetFrame(FrameNumber frame_number)
 
 	const uint8_t key_set = (frame_current >= frame_loop_start);
 	if (key_set)
+	{
+		if (frame_loop_start > 0.f)
+		{
+			for (Pane* pane : panes)
+				pane->SetFrame(frame_loop_start, 0);
+
+			for (Material* material : resources.materials)
+				material->SetFrame(frame_loop_start, 0);
+		}
+
 		frame_number -= frame_loop_start;
+	}
 
 	resources.cur_set = key_set;
 
