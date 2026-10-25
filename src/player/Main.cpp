@@ -616,36 +616,36 @@ int main(int argc, char** argv) {
 
                             auto sound = ch.banner->GetSound();
 
-                            if (sound->HasLoop()) {
-                                SDL_PropertiesID track_props = MIX_GetTrackProperties(active_audio_track);
+                            const int64_t total_frames = MIX_GetAudioDuration(active_audio);
 
-                                int64_t mix_total_frames = SDL_GetNumberProperty(track_props, MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, 0);
+                            if (sound->HasLoop() && total_frames > 0) {
+                                const int64_t loop_start = sound->GetLoopStart();
+                                int64_t loop_end = sound->GetLoopEnd();
 
-                                // hax since i think our parsing sucks sometimes and causes sdl to crash
-                                if (mix_total_frames <= 0 && sound->GetDurationSeconds() > 0) {
-                                    int mixer_sr = 48000;
-
-                                    SDL_GetNumberProperty(MIX_GetMixerProperties(mixer), MIX_PROP_MIXER_DEVICE_NUMBER, (int64_t)&mixer_sr);
-                                    mix_total_frames = static_cast<int64_t>(sound->GetDurationSeconds() * mixer_sr);
+                                // sometimes libwb returns 0 here, idk why but this fixes it
+                                if (loop_end == 0 && total_frames > 0) {
+                                    loop_end = total_frames;
                                 }
 
-                                double wii_total_frames = sound->GetLoopEnd();
-                                double scale_factor = (wii_total_frames > 0) ? (static_cast<double>(mix_total_frames) / wii_total_frames) : 1.0;
-
-                                uint32_t start_val = static_cast<uint32_t>(sound->GetLoopStart() * scale_factor);
-                                uint32_t end_val   = static_cast<uint32_t>(mix_total_frames);
-
-                                if (end_val > start_val) {
-                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, -1);
-                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER, start_val);
-                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, end_val);
-                                } else {
-                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
-                                    SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, -1);
-                                }
-                            } else {
-                                SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
-                                SDL_SetNumberProperty(local_props, MIX_PROP_PLAY_MAX_FRAME_NUMBER, -1);
+                                if (loop_start >= 0 &&
+                                    loop_end > loop_start &&
+                                    loop_end <= total_frames) {
+                                    SDL_SetNumberProperty(
+                                        local_props,
+                                        MIX_PROP_PLAY_LOOPS_NUMBER,
+                                        -1
+                                    );
+                                    SDL_SetNumberProperty(
+                                        local_props,
+                                        MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER,
+                                        loop_start
+                                    );
+                                    SDL_SetNumberProperty(
+                                        local_props,
+                                        MIX_PROP_PLAY_MAX_FRAME_NUMBER,
+                                        loop_end
+                                    );
+                                    }
                             }
 
                             if (!MIX_PlayTrack(active_audio_track, local_props)) {
@@ -668,7 +668,6 @@ int main(int argc, char** argv) {
             active_banner_visual.layout = nullptr;
         }
     };
-
 
     auto return_to_grid = [&]() {
         stop_audio();
