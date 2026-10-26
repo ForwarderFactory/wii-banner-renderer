@@ -23,7 +23,7 @@ distribution.
 
 #include "../include/libwb/Picture.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 void Picture::Load(std::istream& file)

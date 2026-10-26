@@ -35,7 +35,7 @@ distribution.
 #include <libwb/Font.h>
 #include <libwb/Types.h>
 
-namespace WiiBanner
+namespace wb
 {
 
 using PaletteList = std::vector<std::string>;

@@ -26,7 +26,7 @@ distribution.
 #include "../include/libwb/Window.h"
 #include "../include/libwb/Endian.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 void Window::Load(std::istream& file)

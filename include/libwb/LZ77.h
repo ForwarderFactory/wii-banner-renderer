@@ -38,7 +38,7 @@ enum : u32
     BINARY_MAGIC_LZ77 = MAKE_FOURCC('L', 'Z', '7', '7')
 };
 
-namespace lz77
+namespace wb::lz77
 {
 
 // The 4-byte header is little-endian: low byte is (type << 4), the upper
@@ -122,90 +122,91 @@ inline bool Decompress(const std::vector<uint8_t>& in, std::vector<uint8_t>& out
    return Decompress(in.empty() ? NULL : &in[0], in.size(), out);
 }
 
-}  // namespace lz77
+}  // namespace wb::lz77
 
-class LZ77Decompressor
-{
-public:
-    LZ77Decompressor(std::istream& in)
-    {
-       const u32 TYPE_LZ77 = 1;
+namespace wb {
+   class LZ77Decompressor
+   {
+   public:
+      LZ77Decompressor(std::istream& in)
+      {
+         constexpr u32 TYPE_LZ77 = 1;
 
-       u32 magic;
-       in >> BE >> magic;
+         u32 magic;
+         in >> BE >> magic;
 
-       if (magic != BINARY_MAGIC_LZ77)
-       {
-          // LZ77 header not present
-          in.seekg(-4, std::ios::cur);
-          ret_stream = &in;
-          return;
-       }
+         if (magic != BINARY_MAGIC_LZ77)
+         {
+            // LZ77 header not present
+            in.seekg(-4, std::ios::cur);
+            ret_stream = &in;
+            return;
+         }
 
-       ret_stream = &data;
+         ret_stream = &data;
 
-       u32 hdr;
-       in >> LE >> hdr;
+         u32 hdr;
+         in >> LE >> hdr;
 
-       const u32 uncompressed_length = hdr >> 8;
-       const u32 compression_type = hdr >> 4 & 0xf;
+         const u32 uncompressed_length = hdr >> 8;
+         const u32 compression_type = hdr >> 4 & 0xf;
 
-       if (TYPE_LZ77 != compression_type)
-          return;
+         if (TYPE_LZ77 != compression_type)
+            return;
 
-       u32 written = 0;
-       while (written != uncompressed_length)
-       {
-          u8 flags = in.get();
-          for (int f = 0; f != 8; ++f)
-          {
-             if (flags & 0x80)
-             {
-                u16 info;
-                in >> BE >> info;
+         u32 written = 0;
+         while (written != uncompressed_length)
+         {
+            u8 flags = in.get();
+            for (int f = 0; f != 8; ++f)
+            {
+               if (flags & 0x80)
+               {
+                  u16 info;
+                  in >> BE >> info;
 
-                const u8 num = 3 + (info >> 12);
-                const u16 disp = info & 0xFFF;
-                u32 ptr = written - disp - 1;
+                  const u8 num = 3 + (info >> 12);
+                  const u16 disp = info & 0xFFF;
+                  u32 ptr = written - disp - 1;
 
-                data.seekg(ptr, std::ios::beg);
-                for (u8 p = 0; p != num; ++p)
-                {
-                   char c;
-                   data.get(c);
-                   data.put(c);
-                   ++written;
+                  data.seekg(ptr, std::ios::beg);
+                  for (u8 p = 0; p != num; ++p)
+                  {
+                     char c;
+                     data.get(c);
+                     data.put(c);
+                     ++written;
 
-                   if (written == uncompressed_length)
-                      break;
-                }
-             }
-             else
-             {
-                char c;
-                in.get(c);
-                data.put(c);
-                ++written;
-             }
+                     if (written == uncompressed_length)
+                        break;
+                  }
+               }
+               else
+               {
+                  char c;
+                  in.get(c);
+                  data.put(c);
+                  ++written;
+               }
 
-             flags <<= 1;
+               flags <<= 1;
 
-             if (written == uncompressed_length)
-                break;
-          }
-       }
+               if (written == uncompressed_length)
+                  break;
+            }
+         }
 
-       data.seekg(0, std::ios::beg);
-    }
+         data.seekg(0, std::ios::beg);
+      }
 
-    std::istream& GetStream()
-    {
-       return *ret_stream;
-    }
+      std::istream& GetStream()
+      {
+         return *ret_stream;
+      }
 
-private:
-    std::stringstream data;
-    std::istream* ret_stream;
-};
-
+   private:
+      std::stringstream data;
+      std::istream* ret_stream;
+   };
+}
 #endif

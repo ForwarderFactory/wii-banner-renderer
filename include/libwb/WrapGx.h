@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -23,6 +24,11 @@ distribution.
 
 #ifndef WII_BNR_WRAP_GX_
 #define WII_BNR_WRAP_GX_
+
+/* should we really wrap this in namespace wb?
+ * doing so would immediately make this incompatible with the original GX implementation
+ * im choosing not to do so as of now, we'll see how that ends up.
+ */
 
 #include <cstring>
 

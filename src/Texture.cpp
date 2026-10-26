@@ -27,7 +27,7 @@ distribution.
 #include "../include/libwb/Texture.h"
 #include "../include/libwb/Endian.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 enum BinaryMagic : uint32_t
@@ -54,7 +54,7 @@ Texture::~Texture()
 	g_occupied_tlut_names.erase(tlut_name);
 }
 
-	void Texture::Load(std::istream& file)
+void Texture::Load(std::istream& file)
 {
 	const std::streamoff file_start = file.tellg();
 

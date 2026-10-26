@@ -28,7 +28,7 @@ distribution.
 #include <cstdint>
 #include <vector>
 
-namespace ash
+namespace wb::ash
 {
 
 inline bool IsCompressed(const uint8_t* data, size_t size)

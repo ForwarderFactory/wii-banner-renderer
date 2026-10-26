@@ -44,6 +44,7 @@ distribution.
 
 #include "../include/libwb/WrapGx.h"
 
+#include "logger_holder.hpp"
 #include "../include/libwb/Funcs.h"
 
 static u8 g_texture_decode_buffer[1024 * 1024 * 4];
@@ -173,8 +174,8 @@ struct GLTexObj
 
 			for (u32 level = 0; level < num_levels; ++level)
 			{
-				const u32 expanded_width  = RoundUp(level_width, TexDecoder_GetBlockWidthInTexels(fmt));
-				const u32 expanded_height = RoundUp(level_height, TexDecoder_GetBlockHeightInTexels(fmt));
+				const u32 expanded_width  = wb::RoundUp(level_width, TexDecoder_GetBlockWidthInTexels(fmt)); // TODO: GX should own this
+				const u32 expanded_height = wb::RoundUp(level_height, TexDecoder_GetBlockHeightInTexels(fmt)); // and also this
 
 				// decode this level
 				auto const pcfmt = TexDecoder_Decode(g_texture_decode_buffer,
@@ -184,7 +185,7 @@ struct GLTexObj
 				{
 				default:
 				case PC_TEX_FMT_NONE:
-					std::cout << "Error decoding texture!!!\n";
+					wb::logger << wb::LogType::Warning << "Error decoding texture!!!\n";
 
 				case PC_TEX_FMT_BGRA32:
 					gl_format = GL_BGRA;
@@ -260,8 +261,8 @@ u32 	GX_GetTexBufferSize (u16 wd, u16 ht, u32 fmt, u8 mipmap, u8 maxlod)
 	for (u32 level = 0; level < num_levels; ++level)
 	{
 		total += TexDecoder_GetTextureSizeInBytes(
-			RoundUp(level_w, TexDecoder_GetBlockWidthInTexels(fmt)),
-			RoundUp(level_h, TexDecoder_GetBlockHeightInTexels(fmt)), fmt);
+			wb::RoundUp(level_w, TexDecoder_GetBlockWidthInTexels(fmt)), // TODO: GX should own this
+			wb::RoundUp(level_h, TexDecoder_GetBlockHeightInTexels(fmt)), fmt); // this too
 
 		level_w = std::max<u32>(1, level_w >> 1);
 		level_h = std::max<u32>(1, level_h >> 1);
@@ -647,7 +648,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
-			std::cout << "GX_SetTexCoordGen: unsupported tgen_src " << (int)tg.tgen_src
+			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unsupported tgen_src " << (int)tg.tgen_src
 				<< " on texcoord " << i << ", falling back to gl_MultiTexCoord" << i << "\n";
 			src_vec = "vec4(gl_MultiTexCoord" + std::to_string(i) + ".st, 0.0, 1.0)";
 		}
@@ -665,13 +666,13 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
-			std::cout << "GX_SetTexCoordGen: unrecognized mtxsrc " << (int)tg.mtxsrc
+			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unrecognized mtxsrc " << (int)tg.mtxsrc
 				<< " on texcoord " << i << ", using identity\n";
 			mtx_expr = "mat4(1.0)";
 		}
 
 		if (tg.tgen_typ != GX_TG_MTX2x4 && tg.tgen_typ != GX_TG_MTX3x4)
-			std::cout << "GX_SetTexCoordGen: unsupported tgen_typ " << (int)tg.tgen_typ
+			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unsupported tgen_typ " << (int)tg.tgen_typ
 				<< " on texcoord " << i << ", treating as GX_TG_MTX2x4\n";
 
 		vert_ss << "gl_TexCoord[" << i << "] = " << mtx_expr << " * " << src_vec << ";";
@@ -765,7 +766,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 		if (stage.ind_mtxid != GX_ITM_OFF && !stage_has_ind)
 		{
-			std::cout << "Material: unsupported indirect matrix id " << (int)stage.ind_mtxid
+			wb::logger << wb::LogType::Warning << "Material: unsupported indirect matrix id " << (int)stage.ind_mtxid
 				<< " (or indirect stage " << (int)stage.ind_texid << " not configured)"
 				<< ", disabling indirect for this stage\n";
 		}
@@ -811,7 +812,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 			if (stage.ind_wrap_s != GX_ITW_OFF || stage.ind_wrap_t != GX_ITW_OFF)
 			{
-				std::cout << "Material: indirect wrap modes (" << (int)stage.ind_wrap_s
+				wb::logger << wb::LogType::Warning << "Material: indirect wrap modes (" << (int)stage.ind_wrap_s
 					<< ", " << (int)stage.ind_wrap_t << ") aren't emulated, ignoring\n";
 			}
 
@@ -989,7 +990,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 			default:
 				frag_ss << "result" << swiz << " = d" << swiz;
-				std::cout << "Unsupported tevop!! " << (int)tevop << '\n';
+				wb::logger << wb::LogType::Warning << "Unsupported tevop!! " << (int)tevop << '\n';
 				break;
 			}
 
@@ -1013,7 +1014,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	frag_ss << '}';
 
-	//std::cout << frag_ss.str() << '\n';
+	//wb::logger << wb::LogType::Warning << frag_ss.str() << '\n';
 
 	// create/compile fragment shader
 	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
@@ -1039,14 +1040,14 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &frag_compiled);
 
 	if (!vert_compiled) {
-		std::cout << "Failed to compile vertex shader\n";
-		std::cout << vert_ss.str() << "\n";
+		wb::logger << wb::LogType::Warning << "Failed to compile vertex shader\n";
+		wb::logger << wb::LogType::Warning << vert_ss.str() << "\n";
 	}
 
 	if (!frag_compiled)
 	{
-		std::cout << "Failed to compile fragment shader\n";
-		std::cout << frag_ss.str() << "\n";
+		wb::logger << wb::LogType::Warning << "Failed to compile fragment shader\n";
+		wb::logger << wb::LogType::Warning << frag_ss.str() << "\n";
 	}
 
 	}
@@ -1062,7 +1063,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	glGetProgramiv(program, GL_LINK_STATUS, &link_status);
 
 	if (!link_status)
-		std::cout << "Failed to link program!\n";
+		wb::logger << wb::LogType::Warning << "Failed to link program!\n";
 
 	glUseProgram(program);
 
@@ -1078,7 +1079,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	{
 	GLchar infolog[10240] = {};
 	glGetProgramInfoLog(program, 10240, nullptr, infolog);
-	std::cout << infolog;
+	wb::logger << wb::LogType::Warning << infolog;
 	}
 
 	// pause

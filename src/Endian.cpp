@@ -26,36 +26,38 @@ distribution.
 
 #include "../include/libwb/Endian.h"
 
-BEStreamManip BE;
-LEStreamManip LE;
+namespace wb {
+	BEStreamManip BE;
+	LEStreamManip LE;
 
-template <>
-void SwapData<1>(u8* data)
-{
-	// nothing
-}
+	template <>
+	void SwapData<1>(u8* data)
+	{
+		// nothing
+	}
 
-template <>
-void SwapData<2>(u8* data)
-{
-	*reinterpret_cast<u16*>(data) = Common::swap16(data);
-}
+	template <>
+	void SwapData<2>(u8* data)
+	{
+		*reinterpret_cast<u16*>(data) = Common::swap16(data);
+	}
 
-template <>
-void SwapData<4>(u8* data)
-{
-	*reinterpret_cast<u32*>(data) = Common::swap32(data);
-}
+	template <>
+	void SwapData<4>(u8* data)
+	{
+		*reinterpret_cast<u32*>(data) = Common::swap32(data);
+	}
 
-template <>
-void SwapData<8>(u8* data)
-{
-	*reinterpret_cast<u64*>(data) = Common::swap64(data);
-}
+	template <>
+	void SwapData<8>(u8* data)
+	{
+		*reinterpret_cast<u64*>(data) = Common::swap64(data);
+	}
 
-std::ostream& operator<<(std::ostream& lhs, const FourCC& rhs)
-{
-	const u32 data = Common::swap32(rhs.data);
-	lhs.write(reinterpret_cast<const char*>(&data), 4);
-	return lhs;
+	std::ostream& operator<<(std::ostream& lhs, const FourCC& rhs)
+	{
+		const u32 data = Common::swap32(rhs.data);
+		lhs.write(reinterpret_cast<const char*>(&data), 4);
+		return lhs;
+	}
 }

@@ -28,7 +28,7 @@ distribution.
 #include <vector>
 #include <cstdint>
 
-namespace WiiBanner
+namespace wb
 {
 
 class Sound

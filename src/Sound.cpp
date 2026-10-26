@@ -31,11 +31,13 @@ distribution.
 #include "CommonTypes.h"
 
 #include "../include/libwb/Sound.h"
+
+#include "logger_holder.hpp"
 #include "../include/libwb/LZ77.h"
 #include "../include/libwb/Endian.h"
 #include "../include/libwb/Types.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 enum BinaryMagic : u32
@@ -143,7 +145,7 @@ struct BNS
 		}
 		else
 		{
-			std::cout << static_cast<int>(info.channel_count) << " channels unsupported!\n";
+			logger << static_cast<int>(info.channel_count) << " channels unsupported!\n";
 		}
 
 		in.seekg(start + hdr.data_off, std::istream::beg);
@@ -157,7 +159,7 @@ struct BNS
 			|| (hdr.data_len != data.size)
 			|| (info.magic != BINARY_MAGIC_BNS_INFO)
 			|| (data.magic != BINARY_MAGIC_BNS_DATA))
-			std::cout << "sound.bin appears invalid\n";
+			logger << "sound.bin appears invalid\n";
 	}
 
 	[[nodiscard]] u8  GetChannelsCount() const { return info.channel_count; }
@@ -326,7 +328,7 @@ u32 DecodeToPCM(s16* pcm)
 				bitsPerSample        = *reinterpret_cast<const uint16_t*>(data + offset + 14);
 
 				if (audioFormat != 1) {
-					std::cerr << "Only PCM WAV supported\n";
+					logger << LogType::Warning << "Only PCM WAV supported\n";
 					return false;
 				}
 			}
@@ -367,7 +369,7 @@ u32 DecodeToPCM(s16* pcm)
 			return false;
 
 		if (bitsPerSample != 16) {
-			std::cerr << "Only 16-bit WAV supported\n";
+			logger << LogType::Warning << "Only 16-bit WAV supported\n";
 			return false;
 		}
 
@@ -393,7 +395,7 @@ bool Sound::Load(std::istream& file)
     in >> magic;
 
     if (magic == BINARY_MAGIC_WAV) {
-        std::cout << "WAV detected\n";
+        logger << "WAV detected\n";
 
         in >> LE >> file_len;
         in.seekg(start, std::istream::beg);
@@ -409,7 +411,7 @@ bool Sound::Load(std::istream& file)
     }
     if (magic == BINARY_MAGIC_AIFF)
     {
-	    std::cout << "AIFF detected\n";
+	    logger << "AIFF detected\n";
 
 	    in >> BE >> file_len;
 	    in.seekg(start, std::istream::beg);
@@ -424,7 +426,7 @@ bool Sound::Load(std::istream& file)
 	    return true;
     }
     if (magic == BINARY_MAGIC_BNS) {
-	    std::cout << "BNS detected\n";
+	    logger << "BNS detected\n";
 
 	    format = FORMAT_BNS;
 
@@ -432,9 +434,9 @@ bool Sound::Load(std::istream& file)
 
 	    BNS bns_file;
 
-	    std::cout << "Opening BNS...\n";
+	    logger << "Opening BNS...\n";
 	    bns_file.Open(in);
-	    std::cout << "BNS opened\n";
+	    logger << "BNS opened\n";
 
 	    sampleCount = bns_file.GetSamplesCount();
 	    channels    = bns_file.GetChannelsCount();
@@ -443,54 +445,54 @@ bool Sound::Load(std::istream& file)
 	    loop_end    = sampleCount;
     	has_loop   = bns_file.GetLoop();
 
-    	std::cout << "Expected PCM samples: "
+    	logger << "Expected PCM samples: "
 			<< bns_file.GetDecodedSampleCount()
 			<< "\n";
 
-    	std::cout << "BNS header samples: "
+    	logger << "BNS header samples: "
 				  << sampleCount * channels
 				  << "\n";
 
-	    std::cout
+	    logger
 			    << "samples=" << sampleCount
 			    << " channels=" << channels
 			    << " rate=" << sampleRate
 			    << "\n";
 
-	    std::cout << "Resizing PCM buffer\n";
+	    logger << "Resizing PCM buffer\n";
 	    samples.resize(sampleCount * channels);
 
-	    std::cout << "Decoding PCM...\n";
+	    logger << "Decoding PCM...\n";
 	    u32 written = bns_file.DecodeToPCM(samples.data());
 
-	    std::cout << "Allocated samples: " << samples.size() << "\n";
-	    std::cout << "Written samples: " << written << "\n";
+	    logger << "Allocated samples: " << samples.size() << "\n";
+	    logger << "Written samples: " << written << "\n";
 
 	    samples.resize(std::min<size_t>(written, samples.size()));
 
 	    if (channels != 0)
 		    samples.resize((samples.size() / channels) * channels);
 
-    	std::cout << "Decoded samples: " << samples.size() << "\n";
-    	std::cout << "Channels: " << channels << "\n";
-    	std::cout << "Remainder: " << (samples.size() % channels) << "\n";
+    	logger << "Decoded samples: " << samples.size() << "\n";
+    	logger << "Channels: " << channels << "\n";
+    	logger << "Remainder: " << (samples.size() % channels) << "\n";
 
-	    std::cout << "Decode complete\n";
+	    logger << "Decode complete\n";
 
 	    this->channels = channels;
 
-	    std::cout << "channels assigned\n";
+	    logger << "channels assigned\n";
 
 	    this->sampleRate = sampleRate;
 
-	    std::cout << "rate assigned\n";
+	    logger << "rate assigned\n";
 
-	    std::cout << "Returning true from Sound::Load\n";
+	    logger << "Returning true from Sound::Load\n";
 
 	    return true;
     }
 
-    std::cout << "Unknown format\n";
+    logger << "Unknown format\n";
     return false;
 }
 
@@ -544,7 +546,7 @@ void Sound::WritePCMAsWAV(const std::string& path,
 
 
 void Sound::WriteWAV(const std::string& path) {
-    //std::cout << "called" << std::flush;
+    //logger << "called" << std::flush;
     if (format == FORMAT_WAV) {
         if (!samples.empty() && channels != 0 && sampleRate != 0) {
             WritePCMAsWAV(path, samples, channels, sampleRate);

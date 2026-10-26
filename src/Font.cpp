@@ -29,7 +29,7 @@ distribution.
 #include <array>
 #include <limits>
 
-namespace WiiBanner
+namespace wb
 {
 namespace
 {

@@ -28,101 +28,102 @@ distribution.
 
 #include <libwb/Types.h>
 
-// S : size in bytes
-template <int S>
-void SwapData(uint8_t* data);
+namespace wb {
+	// S : size in bytes
+	template <int S>
+	void SwapData(uint8_t* data);
 
-class BEStream
-{
-public:
-	BEStream(std::istream& stream)
-		: m_stream(stream)
-	{}
-
-	template <typename V>
-	BEStream& operator>>(V& rhs)
+	class BEStream
 	{
-		static_assert(std::is_arithmetic<V>::value, "BEStream operator >> parameter must be arithmetic");
+	public:
+		BEStream(std::istream& stream)
+			: m_stream(stream)
+		{}
 
-		m_stream.read(reinterpret_cast<char*>(&rhs), sizeof(V));
-		SwapData<sizeof(V)>(reinterpret_cast<uint8_t*>(&rhs));
+		template <typename V>
+		BEStream& operator>>(V& rhs)
+		{
+			static_assert(std::is_arithmetic<V>::value, "BEStream operator >> parameter must be arithmetic");
 
-		return *this;
+			m_stream.read(reinterpret_cast<char*>(&rhs), sizeof(V));
+			SwapData<sizeof(V)>(reinterpret_cast<uint8_t*>(&rhs));
+
+			return *this;
+		}
+
+	private:
+		std::istream& m_stream;
+	};
+
+	struct BEStreamManip
+	{
+		BEStreamManip() {}
+	};
+
+	extern BEStreamManip BE;
+
+	inline BEStream operator>>(std::istream& lhs, const BEStreamManip&)
+	{
+		return BEStream(lhs);
 	}
 
-private:
-	std::istream& m_stream;
-};
-
-struct BEStreamManip
-{
-	BEStreamManip() {}
-};
-
-extern BEStreamManip BE;
-
-inline BEStream operator>>(std::istream& lhs, const BEStreamManip&)
-{
-	return BEStream(lhs);
-}
-
-class LEStream
-{
-public:
-	LEStream(std::istream& stream)
-		: m_stream(stream)
-	{}
-
-	template <typename V>
-	LEStream& operator>>(V& rhs)
+	class LEStream
 	{
-		static_assert(std::is_arithmetic<V>::value, "LEStream operator >> parameter must be arithmetic");
+	public:
+		LEStream(std::istream& stream)
+			: m_stream(stream)
+		{}
 
-		m_stream.read(reinterpret_cast<char*>(&rhs), sizeof(rhs));
+		template <typename V>
+		LEStream& operator>>(V& rhs)
+		{
+			static_assert(std::is_arithmetic<V>::value, "LEStream operator >> parameter must be arithmetic");
 
-		return *this;
+			m_stream.read(reinterpret_cast<char*>(&rhs), sizeof(rhs));
+
+			return *this;
+		}
+
+	private:
+		std::istream& m_stream;
+	};
+
+	struct LEStreamManip
+	{
+		LEStreamManip() {}
+	};
+
+	extern LEStreamManip LE;
+
+	inline LEStream operator>>(std::istream& lhs, const LEStreamManip&)
+	{
+		return LEStream(lhs);
 	}
 
-private:
-	std::istream& m_stream;
-};
+	template <typename T>
+	void ReadBEArray(std::istream& file, T* data, unsigned int size)
+	{
+		auto bestrm = file >> BE;
 
-struct LEStreamManip
-{
-	LEStreamManip() {}
-};
+		for (unsigned int i = 0; i != size; ++i)
+			bestrm >> data[i];
+	}
 
-extern LEStreamManip LE;
+	template <typename T>
+	void ReadLEArray(std::istream& file, T* data, unsigned int size)
+	{
+		auto lestrm = file >> LE;
 
-inline LEStream operator>>(std::istream& lhs, const LEStreamManip&)
-{
-	return LEStream(lhs);
+		for (unsigned int i = 0; i != size; ++i)
+			lestrm >> data[i];
+	}
+
+	inline std::istream& operator>>(std::istream& lhs, FourCC& rhs)
+	{
+		lhs >> BE >> rhs.data;
+		return lhs;
+	}
+
+	std::ostream& operator<<(std::ostream& lhs, const FourCC& rhs);
 }
-
-template <typename T>
-void ReadBEArray(std::istream& file, T* data, unsigned int size)
-{
-	auto bestrm = file >> BE;
-
-	for (unsigned int i = 0; i != size; ++i)
-		bestrm >> data[i];
-}
-
-template <typename T>
-void ReadLEArray(std::istream& file, T* data, unsigned int size)
-{
-	auto lestrm = file >> LE;
-
-	for (unsigned int i = 0; i != size; ++i)
-		lestrm >> data[i];
-}
-
-inline std::istream& operator>>(std::istream& lhs, FourCC& rhs)
-{
-	lhs >> BE >> rhs.data;
-	return lhs;
-}
-
-std::ostream& operator<<(std::ostream& lhs, const FourCC& rhs);
-
 #endif
