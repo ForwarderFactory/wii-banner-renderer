@@ -63,6 +63,7 @@ struct Settings {
 	std::filesystem::path font_archive; // app archives from shared1/
 
 	void print_settings() const {
+		std::cout << "Settings:\n";
 		std::cout << "FPS: " << fps << "\n";
 		std::cout << "Icon: " << icon << "\n";
 		std::cout << "Minimum length: " << (minimum_length == -1 ? "No limit" : std::to_string(minimum_length)) << " sec\n";
@@ -531,8 +532,6 @@ int main(int argc, char** argv) {
 		std::cerr << "No files specified.\n";
 		return EXIT_FAILURE;
 	}
-
-	std::cout << "Settings:\n";
 
 	if (settings.logging)
 		settings.print_settings();
