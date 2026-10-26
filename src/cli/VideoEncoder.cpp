@@ -59,8 +59,6 @@ VideoEncoder::VideoEncoder(
 		if (avformat_write_header(format_ctx, nullptr) < 0) {
 			throw std::runtime_error("Error writing output file header");
 		}
-
-		std::cout << "VideoEncoder initialized: " << output_path << " (" << width << "x" << height << " @ " << fps << "fps)\n";
 	} catch (const std::exception&) {
 		cleanup();
 		throw;
@@ -492,8 +490,6 @@ void VideoEncoder::finish() {
 
 	finished = true;
 	cleanup();
-
-	std::cout << "VideoEncoder finished. Wrote " << frame_count << " video frames.\n";
 }
 
 void VideoEncoder::encodeAndWriteAudioFrame() const {
