@@ -29,7 +29,7 @@ distribution.
 #include <cstdint>
 #include <vector>
 
-namespace yaz0
+namespace wb::yaz0
 {
 
 inline bool IsCompressed(const uint8_t* data, size_t size)

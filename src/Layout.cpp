@@ -41,25 +41,31 @@ distribution.
 #include <string>
 #include <vector>
 
-namespace WiiBanner
+#include "logger_holder.hpp"
+
+namespace wb
 {
 
-enum BinaryMagic : uint32_t
-{
-	BINARY_MAGIC_LAYOUT = MAKE_FOURCC('R', 'L', 'Y', 'T'),
+namespace {
+	enum BinaryMagic : uint32_t
+	{
+		BINARY_MAGIC_LAYOUT = MAKE_FOURCC('R', 'L', 'Y', 'T'),
 
-	BINARY_MAGIC_PANE_PUSH = MAKE_FOURCC('p', 'a', 's', '1'),
-	BINARY_MAGIC_PANE_POP = MAKE_FOURCC('p', 'a', 'e', '1'),
-	BINARY_MAGIC_GROUP_PUSH = MAKE_FOURCC('g', 'r', 's', '1'),
-	BINARY_MAGIC_GROUP_POP = MAKE_FOURCC('g', 'r', 'e', '1')
-};
+		BINARY_MAGIC_PANE_PUSH = MAKE_FOURCC('p', 'a', 's', '1'),
+		BINARY_MAGIC_PANE_POP = MAKE_FOURCC('p', 'a', 'e', '1'),
+		BINARY_MAGIC_GROUP_PUSH = MAKE_FOURCC('g', 'r', 's', '1'),
+		BINARY_MAGIC_GROUP_POP = MAKE_FOURCC('g', 'r', 'e', '1')
+	};
+}
 
-template <typename P>
-Pane* LoadNewPane(std::istream& file)
-{
-	P* const pane = new P;
-	pane->Load(file);
-	return pane;
+namespace {
+	template <typename P>
+	Pane* LoadNewPane(std::istream& file)
+	{
+		P* const pane = new P;
+		pane->Load(file);
+		return pane;
+	}
 }
 
 void Layout::Load(std::istream& file)
@@ -166,7 +172,7 @@ void Layout::Load(std::istream& file)
 				resources.materials.push_back(mat);
 			});
 
-			std::cout << "Loaded " << resources.materials.size() << " Materials\n";
+			logger << "Loaded " << resources.materials.size() << " Materials\n";
 		}
 		else if (magic == Pane::BINARY_MAGIC)
 		{
@@ -241,8 +247,8 @@ void Layout::Load(std::istream& file)
 		}
 		else
 		{
-			std::cout << "UNKNOWN SECTION: ";
-			std::cout << magic << '\n';
+			logger << "UNKNOWN SECTION: ";
+			logger << magic << '\n';
 		}
 	});
 }
@@ -294,7 +300,7 @@ void Layout::DebugDumpAll() const
 	{
 		for (Pane* pane : list)
 		{
-			std::printf("[dump] %*s'%s' v=%d h=%d alpha=%d flags=0x%02X "
+			logger.printf("[dump] %*s'%s' v=%d h=%d alpha=%d flags=0x%02X "
 				"t=(%.1f,%.1f) s=(%.2f,%.2f) size=%.1fx%.1f origin=%d\n",
 				depth * 2, "", pane->GetName().c_str(),
 				pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0,
@@ -350,7 +356,7 @@ void Layout::DebugTrace(const char* names) const
 
 			if (wanted.count(pane->GetName()))
 			{
-				std::printf("[trace] frame %d '%s' local=(%.1f,%.1f) "
+				logger.printf("[trace] frame %d '%s' local=(%.1f,%.1f) "
 					"scale=(%.2f,%.2f) abs=(%.1f,%.1f) v=%d z=%.1f "
 					"rot=(%.1f,%.1f,%.1f) size=%.1fx%.1f flags=0x%02X "
 					"origin_raw=%d\n",
@@ -458,10 +464,10 @@ namespace
 	{
 		for (const auto& entry : groups)
 		{
-			std::printf("[layout] %*sgroup '%s' (%zu panes)\n", depth * 2, "",
+			logger.printf("[layout] %*sgroup '%s' (%zu panes)\n", depth * 2, "",
 				entry.first.c_str(), entry.second.panes.size());
 			for (const std::string& pane : entry.second.panes)
-				std::printf("[layout] %*s  pane '%s'\n", depth * 2, "", pane.c_str());
+				logger.printf("[layout] %*s  pane '%s'\n", depth * 2, "", pane.c_str());
 			DumpGroups(entry.second.groups, depth + 1);
 		}
 	}
@@ -472,16 +478,16 @@ void Layout::SetLanguage(const std::string& language)
 {
 	if (std::getenv("WB_LAYOUT_DEBUG"))
 	{
-		std::printf("[layout] language '%s', group tree:\n", language.c_str());
+		logger.printf("[layout] language '%s', group tree:\n", language.c_str());
 		DumpGroups(groups, 0);
 
-		std::printf("[layout] pane tree (name, visible, hide):\n");
+		logger.printf("[layout] pane tree (name, visible, hide):\n");
 		std::function<void(const PaneList&, int)> dump_panes =
 			[&](const PaneList& list, int depth)
 		{
 			for (Pane* pane : list)
 			{
-				std::printf("[layout] %*s'%s' v=%d h=%d t=(%.1f,%.1f) "
+				logger.printf("[layout] %*s'%s' v=%d h=%d t=(%.1f,%.1f) "
 					"s=(%.2f,%.2f) size=%.1fx%.1f origin=(%d,%d)\n", depth * 2, "",
 					pane->GetName().c_str(),
 					pane->GetVisible() ? 1 : 0, pane->GetHide() ? 1 : 0,
@@ -626,7 +632,7 @@ Texture* Layout::FindTexture(const std::string& find_name) {
 }
 
 void Layout::AddPalette(const std::string& name, uint8_t key_set) {
-	std::cout << "AddPalette: " << name << "\n";
+	logger << "AddPalette: " << name << "\n";
 
 	if (resources.palettes.size() <= key_set)
 		resources.palettes.resize(key_set + 1);
@@ -635,14 +641,14 @@ void Layout::AddPalette(const std::string& name, uint8_t key_set) {
 
 	if (FindTexture(name))
 	{
-		std::cout << "already exists\n";
+		logger << "already exists\n";
 		return;
 	}
 
 	auto* texture = new Texture;
 	texture->SetName(name);
 
-	std::cout << "Creating texture "
+	logger << "Creating texture "
 		  << texture
 		  << " name="
 		  << texture->GetName()
@@ -650,7 +656,7 @@ void Layout::AddPalette(const std::string& name, uint8_t key_set) {
 
 	resources.textures.push_back(texture);
 
-	std::cout << "added texture: " << texture->GetName() << "\n";
+	logger << "added texture: " << texture->GetName() << "\n";
 }
 
 Pane* Layout::FindPane(const std::string& find_name)

@@ -41,7 +41,9 @@ distribution.
 #include "../include/libwb/Types.h"
 #include <libwb/U8.h>
 
-namespace WiiBanner
+#include "logger_holder.hpp"
+
+namespace wb
 {
 
 enum BinaryMagic : u32
@@ -52,30 +54,31 @@ enum BinaryMagic : u32
 	BINARY_MAGIC_PANE_ANIMATION_INFO = MAKE_FOURCC('p', 'a', 'i', '1')
 };
 
-	bool Banner::is_valid(const std::string& filename) {
-		std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
-		// opening.bnr  archives have 0x600 byte headers
-		// 00000000.app archives have 0x640 byte headers
-		auto header_bytes = 0x600;
+bool Banner::is_valid(const std::string& filename) {
+    std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
+    // opening.bnr  archives have 0x600 byte headers
+    // 00000000.app archives have 0x640 byte headers
+    auto header_bytes = 0x600;
 
-		bnr_file.seekg(header_bytes, std::ios::cur);
+    bnr_file.seekg(header_bytes, std::ios::cur);
 
-		// lets see if this is an opening.bnr
-		FourCC magic;
-		bnr_file >> magic;
-		if (magic != BINARY_MAGIC_U8_ARCHIVE) {
-			// lets see if it's a 00000000.app
-			bnr_file.seekg(60, std::ios::cur);
-			bnr_file >> magic;
+    // lets see if this is an opening.bnr
+    FourCC magic;
+    bnr_file >> magic;
 
-			if (magic != BINARY_MAGIC_U8_ARCHIVE)
-				return false;
+    if (magic != BINARY_MAGIC_U8_ARCHIVE) {
+        // lets see if it's a 00000000.app
+        bnr_file.seekg(60, std::ios::cur);
+        bnr_file >> magic;
 
-			header_bytes = 0x640;
-		}
+        if (magic != BINARY_MAGIC_U8_ARCHIVE)
+            return false;
 
-		return true;
-	}
+        header_bytes = 0x640;
+    }
+
+    return true;
+}
 
 Banner::Banner(const std::string& _filename, const std::string& _font_archive)
 	: layout_banner(nullptr)
@@ -134,7 +137,7 @@ void Banner::LoadSound()
 
         bnr_file.seekg(header_bytes + offset_sound, std::ios::beg);
 
-        std::cout << "Loading sound at offset "
+        logger << "Loading sound at offset "
                   << header_bytes + offset_sound << "\n";
 
         auto* const s = new Sound;
@@ -160,6 +163,10 @@ std::string FirstPresent(const u8archive::Archive& arc,
    return std::string();
 }
 
+Logger& Banner::GetLogger() {
+   return logger;
+}
+
 Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, Vec2f size)
 {
    std::ifstream bnr_file(filename.c_str(), std::ios::binary | std::ios::in);
@@ -170,11 +177,11 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
    u8archive::Archive bin_arc;
    if (!bin_arc.OpenStream(bnr_file, header_bytes + offset, 0, &codec))
    {
-      std::cerr << "Unable to open banner archive at offset " << offset << '\n';
+      logger << LogType::Warning << "Unable to open banner archive at offset " << offset << '\n';
       return nullptr;
    }
 
-   std::cout << lyt_name << ".bin: " << u8archive::CompressionName(codec)
+   logger << lyt_name << ".bin: " << u8archive::CompressionName(codec)
              << ", " << bin_arc.Entries().size() << " entries\n";
 
    std::vector<uint8_t> brlyt;
@@ -189,13 +196,13 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
 
    if (std::getenv("WB_PANE_TRACE"))
    {
-      std::cout << "[trace] static values from the layout file, before any animation:\n";
+      logger << "[trace] static values from the layout file, before any animation:\n";
       layout->DebugTrace(std::getenv("WB_PANE_TRACE"));
    }
 
    if (std::getenv("WB_LAYOUT_DEBUG"))
    {
-      std::cout << "[layout] " << lyt_name << " lyt1: centered="
+      logger << "[layout] " << lyt_name << " lyt1: centered="
                 << layout->GetCentered() << " size=" << layout->GetWidth()
                 << "x" << layout->GetHeight() << ", overridden to "
                 << size.x << "x" << size.y << '\n';
@@ -239,13 +246,13 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
       std::vector<uint8_t> tpl;
       if (!bin_arc.ReadFile("arc/timg/" + texture->GetName(), tpl))
       {
-         std::cerr << "Missing texture: " << texture->GetName() << '\n';
+         logger << LogType::Warning << "Missing texture: " << texture->GetName() << '\n';
          continue;
       }
 
       u8archive::MemoryStream in(tpl);
       texture->Load(in);
-      std::cout << "Loaded texture: " << texture->GetName()
+      logger << "Loaded texture: " << texture->GetName()
                 << " (" << tpl.size() << " bytes)\n";
    }
 
@@ -256,7 +263,7 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
          u8archive::MemoryStream in(brfnt);
          if (font->Load(in))
          {
-            std::cout << "Loaded font: " << font->GetName() << " (banner)\n";
+            logger << "Loaded font: " << font->GetName() << " (banner)\n";
             continue;
          }
       }
@@ -294,19 +301,19 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
          u8archive::MemoryStream in(font_data);
          if (font->Load(in))
          {
-            std::cout << "Loaded font: " << font->GetName()
+            logger << "Loaded font: " << font->GetName()
                       << " (" << archive_path << ")\n";
             break;
          }
       }
 
       if (!font->IsLoaded())
-         std::cerr << "Unable to load font: " << font->GetName() << '\n';
+         logger << LogType::Warning << "Unable to load font: " << font->GetName() << '\n';
    }
 
    if (std::getenv("WB_LAYOUT_DEBUG"))
    {
-      std::cout << "[layout] " << lyt_name << " animations: start='"
+      logger << "[layout] " << lyt_name << " animations: start='"
                 << start_path << "' (" << length_start << " frames), loop='"
                 << loop_path << "' (" << length_loop << " frames)\n";
    }

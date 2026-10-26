@@ -1,3 +1,25 @@
+/*
+Copyright (c) 2026 - Jacob Nilsson
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+claim that you wrote the original software. If you use this software
+in a product, an acknowledgment in the product documentation would be
+appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source
+distribution.
+*/
 #pragma once
 
 #include <cstdint>
@@ -8,103 +30,105 @@
 #include <windows.h>
 #endif
 
-struct Rect
-{
-    int x;
-    int y;
-    int width;
-    int height;
-};
-
-struct Point {
-    double x;
-    double y;
-};
-
-constexpr Rect GetCrop(const std::array<Point, 4>& pts) {
-    double min_x = pts[0].x;
-    double max_x = pts[0].x;
-    double min_y = pts[0].y;
-    double max_y = pts[0].y;
-
-    for (const auto& p : pts) {
-        min_x = std::min(min_x, p.x);
-        max_x = std::max(max_x, p.x);
-        min_y = std::min(min_y, p.y);
-        max_y = std::max(max_y, p.y);
-    }
-
-    int width = static_cast<int>(max_x - min_x);
-    int height = static_cast<int>(max_y - min_y);
-
-    width &= ~1;
-    height &= ~1;
-
-    return {
-        static_cast<int>(min_x),
-        static_cast<int>(min_y),
-        width,
-        height
+namespace wb {
+    struct Rect
+    {
+        int x;
+        int y;
+        int width;
+        int height;
     };
-}
 
-class Renderer
-{
-public:
-    Renderer(int width, int height);
-    ~Renderer();
+    struct Point {
+        double x;
+        double y;
+    };
 
-    void BeginFrame();
-    void EndFrame();
-    bool SavePNG(const std::string& path, int width, int height);
-    void ReadPixelsTo(FILE* output);
-    void ReadPixelsTo(FILE *output, Rect crop) const;
+    constexpr Rect GetCrop(const std::array<Point, 4>& pts) {
+        double min_x = pts[0].x;
+        double max_x = pts[0].x;
+        double min_y = pts[0].y;
+        double max_y = pts[0].y;
 
-    unsigned char *GetFrameData();
+        for (const auto& p : pts) {
+            min_x = std::min(min_x, p.x);
+            max_x = std::max(max_x, p.x);
+            min_y = std::min(min_y, p.y);
+            max_y = std::max(max_y, p.y);
+        }
 
-    std::vector<unsigned char> GetFrameData(Rect crop) const;
+        int width = static_cast<int>(max_x - min_x);
+        int height = static_cast<int>(max_y - min_y);
 
-    [[nodiscard]] const uint8_t* Pixels() const
-    {
-        return m_pixels.data();
+        width &= ~1;
+        height &= ~1;
+
+        return {
+            static_cast<int>(min_x),
+            static_cast<int>(min_y),
+            width,
+            height
+        };
     }
 
-    [[nodiscard]] int Width() const
+    class Renderer
     {
-        return m_width;
-    }
+    public:
+        Renderer(int width, int height);
+        ~Renderer();
 
-    [[nodiscard]] int Height() const
-    {
-        return m_height;
-    }
+        void BeginFrame();
+        void EndFrame();
+        bool SavePNG(const std::string& path, int width, int height);
+        void ReadPixelsTo(FILE* output);
+        void ReadPixelsTo(FILE *output, Rect crop) const;
 
-private:
-    void CreateContext();
-    void DestroyContext();
+        unsigned char *GetFrameData();
 
-    void MakeCurrent();
+        std::vector<unsigned char> GetFrameData(Rect crop) const;
+
+        [[nodiscard]] const uint8_t* Pixels() const
+        {
+            return m_pixels.data();
+        }
+
+        [[nodiscard]] int Width() const
+        {
+            return m_width;
+        }
+
+        [[nodiscard]] int Height() const
+        {
+            return m_height;
+        }
+
+    private:
+        void CreateContext();
+        void DestroyContext();
+
+        void MakeCurrent();
 #if defined(__APPLE__)
-    void CreateFramebuffer();
-    void DestroyFramebuffer();
+        void CreateFramebuffer();
+        void DestroyFramebuffer();
 
-    uint32_t m_framebuffer = 0;
-    uint32_t m_depth_buffer = 0;
-    uint32_t m_color_texture = 0;
+        uint32_t m_framebuffer = 0;
+        uint32_t m_depth_buffer = 0;
+        uint32_t m_color_texture = 0;
 #endif
 
-    int m_width;
-    int m_height;
+        int m_width;
+        int m_height;
 
-    std::vector<uint8_t> m_pixels;
+        std::vector<uint8_t> m_pixels;
 
-    void* m_display = nullptr;
-    void* m_surface = nullptr;
-    void* m_context = nullptr;
+        void* m_display = nullptr;
+        void* m_surface = nullptr;
+        void* m_context = nullptr;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
-    HWND m_hwnd = nullptr;
-    HDC m_hdc = nullptr;
-    HGLRC m_glrc = nullptr;
+        HWND m_hwnd = nullptr;
+        HDC m_hdc = nullptr;
+        HGLRC m_glrc = nullptr;
 #endif
-};
+    };
+}

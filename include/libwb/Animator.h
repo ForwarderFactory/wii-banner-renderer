@@ -31,7 +31,7 @@ distribution.
 
 #include <libwb/Types.h>
 
-namespace WiiBanner
+namespace wb
 {
 	class Layout;
 

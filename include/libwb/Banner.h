@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -25,9 +26,10 @@ distribution.
 #define WII_BNR_BANNER_H_
 
 #include "Layout.h"
+#include "Logger.h"
 #include "Sound.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 class Banner
@@ -56,6 +58,8 @@ public:
 	void UnloadBanner() { delete layout_banner; layout_banner = nullptr; }
 	void UnloadIcon() { delete layout_icon; layout_icon = nullptr; }
 	void UnloadSound() { delete sound; sound = nullptr; }
+
+	Logger& GetLogger();
 
 private:
 	Layout* LoadLayout(const std::string& lyt_name, std::streamoff offset, Vec2f size);

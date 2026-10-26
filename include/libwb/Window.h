@@ -26,7 +26,7 @@ distribution.
 
 #include <libwb/Pane.h>
 
-namespace WiiBanner
+namespace wb
 {
 
 class Window : public Quad

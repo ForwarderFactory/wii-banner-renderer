@@ -31,12 +31,16 @@ distribution.
 #include <cstdio>
 #include <cstdlib>
 
-enum BinaryMagic : uint32_t {
-	BINARY_MAGIC_ANIMATION = MAKE_FOURCC('R', 'L', 'A', 'N'),
-	BINARY_MAGIC_PANE_ANIMATION_INFO = MAKE_FOURCC('p', 'a', 'i', '1')
-};
+#include "logger_holder.hpp"
 
-namespace WiiBanner {
+namespace wb {
+	namespace {
+		enum BinaryMagic : uint32_t {
+			BINARY_MAGIC_ANIMATION = MAKE_FOURCC('R', 'L', 'A', 'N'),
+			BINARY_MAGIC_PANE_ANIMATION_INFO = MAKE_FOURCC('p', 'a', 'i', '1')
+		};
+	}
+
 	FrameNumber Animator::LoadAnimators(std::istream& file, Layout& layout, uint8_t key_set) {
 		const std::streamoff file_start = file.tellg();
 
@@ -96,7 +100,7 @@ namespace WiiBanner {
 					std::string name;
 					std::getline(file, name, '\0'); // null-terminated string
 
-					std::cout << "File: " << name << std::endl;
+					logger << "File: " << name << std::endl;
 
 					layout.AddPalette(name, key_set);
 				}
@@ -126,8 +130,8 @@ namespace WiiBanner {
 			}
 			else
 			{
-				std::cout << "UNKNOWN SECTION: ";
-				std::cout << magic << '\n';
+				logger << "UNKNOWN SECTION: ";
+				logger << magic << '\n';
 			}
 		});
 
@@ -164,7 +168,7 @@ void Animator::LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamo
 			{
 				if (std::getenv("WB_LAYOUT_DEBUG"))
 				{
-					std::printf("[anim] '%s': key data offset %u instead of 12 "
+					logger.printf("[anim] '%s': key data offset %u instead of 12 "
 						"(target %d)\n", GetName().c_str(),
 						static_cast<unsigned>(offset), static_cast<int>(target));
 				}
@@ -188,7 +192,7 @@ void Animator::LoadKeyFrames(std::istream& file, uint8_t tag_count, std::streamo
 				break;
 
 			default:
-				std::cout << "UNKNOWN FRAME DATA TYPE!!\n";
+				logger << "UNKNOWN FRAME DATA TYPE!!\n";
 				break;
 			}
 		});
@@ -226,7 +230,7 @@ void StepKeyHandler::Load(std::istream& file, uint16_t count)
 
 		file.seekg(2, std::ios::cur);
 
-		//std::cout << "\t\t\t" "frame: " << frame << ' ' << pair.first << " " << pair.second << '\n';
+		//logger << "\t\t\t" "frame: " << frame << ' ' << pair.first << " " << pair.second << '\n';
 	}
 }
 
@@ -242,7 +246,7 @@ void HermiteKeyHandler::Load(std::istream& file, uint16_t count)
 
 		keys.insert(pair);
 
-		//std::cout << "\t\t\t" "frame: " << frame << ' ' << keys[frame] << '\n';
+		//logger << "\t\t\t" "frame: " << frame << ' ' << keys[frame] << '\n';
 	}
 }
 
@@ -309,14 +313,13 @@ float HermiteKeyHandler::GetFrame(FrameNumber frame_number) const {
 void HermiteKeyHandler::DebugPrint() const
 {
 	size_t shown = 0;
-	for (const auto& key : keys)
-	{
+	for (const auto& key : keys) {
 		if (shown++ == 24)
 		{
-			std::printf(" ... (%zu keys total)", keys.size());
+			logger.printf(" ... (%zu keys total)", keys.size());
 			break;
 		}
-		std::printf(" %g:%g", static_cast<double>(key.first),
+		logger.printf(" %g:%g", static_cast<double>(key.first),
 			static_cast<double>(key.second.value));
 	}
 }
@@ -327,28 +330,28 @@ void Animator::DebugPrintKeys() const
 	{
 		for (const auto& track : keys[set].hermite_keys)
 		{
-			std::cout << "[keys] '" << GetName() << "' set " << set << " type "
+			logger << "[keys] '" << GetName() << "' set " << set << " type "
 				<< FourCC(track.first.type) << " index "
 				<< static_cast<int>(track.first.index) << " target "
 				<< static_cast<int>(track.first.target) << ":";
 			track.second.DebugPrint();
-			std::cout << std::endl;
+			logger << "\n";
 		}
 
 		for (const auto& track : keys[set].step_keys)
 		{
-			std::cout << "[keys] '" << GetName() << "' set " << set << " type "
+			logger << "[keys] '" << GetName() << "' set " << set << " type "
 				<< FourCC(track.first.type) << " index "
 				<< static_cast<int>(track.first.index) << " target "
 				<< static_cast<int>(track.first.target) << ": (step track)"
-				<< std::endl;
+				<< "\n";
 		}
 	}
 }
 
 void Animator::ProcessHermiteKey(const KeyType& type, float value)
 {
-	std::cout << "unhandled key (" << GetName() << "): type: " << FourCC(type.type)
+	logger << "unhandled key (" << GetName() << "): type: " << FourCC(type.type)
 	<< " index: " << (int)type.index
 	<< " target: " << (int)type.target
 	<< " value: " << value
@@ -357,7 +360,7 @@ void Animator::ProcessHermiteKey(const KeyType& type, float value)
 
 void Animator::ProcessStepKey(const KeyType& type, StepKeyHandler::KeyData data)
 {
-	std::cout << "unhandled key (" << GetName() << "): type: " << FourCC(type.type)
+	logger << "unhandled key (" << GetName() << "): type: " << FourCC(type.type)
 	<< " index: " << (int)type.index
 	<< " target: " << (int)type.target
 	<< " data:" << (int)data.data1 << " " << (int)data.data2

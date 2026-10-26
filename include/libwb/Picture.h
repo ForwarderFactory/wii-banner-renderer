@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -26,7 +27,7 @@ distribution.
 
 #include <libwb/Pane.h>
 
-namespace WiiBanner
+namespace wb
 {
 
 class Picture : public Quad

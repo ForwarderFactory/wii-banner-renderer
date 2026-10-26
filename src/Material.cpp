@@ -38,7 +38,9 @@ distribution.
 #include <libwb/Layout.h>
 #include <libwb/Texture.h>
 
-namespace WiiBanner
+#include "logger_holder.hpp"
+
+namespace wb
 {
 
 void Material::Load(std::istream& file) {
@@ -50,7 +52,7 @@ void Material::Load(std::istream& file) {
 
 	file >> BE >> flags.value;
 
-	//std::cout << "flags: " << flags.value << '\n';
+	//logger << "flags: " << flags.value << '\n';
 
 	// texture map
 	for (uint32_t i = 0; i != flags.texture_map; ++i)
@@ -104,9 +106,9 @@ void Material::Load(std::istream& file) {
 	{
 		ReadBEArray(file, &tev_swap_table->value, sizeof(tev_swap_table));
 
-		//std::cout << "TevSwapModeTable:\n";
+		//logger << "TevSwapModeTable:\n";
 		//for (unsigned int i = 0; i != 4; ++i)
-		//	std::cout << "\t[" << i << "]: red: " << (int)tev_swap_mode_table[i].red
+		//	logger << "\t[" << i << "]: red: " << (int)tev_swap_mode_table[i].red
 		//		<< " green: " << (int)tev_swap_mode_table[i].green
 		//		<< " blue: " << (int)tev_swap_mode_table[i].blue
 		//		<< " alpha: " << (int)tev_swap_mode_table[i].alpha << '\n';
@@ -267,7 +269,7 @@ void Material::Load(std::istream& file) {
 		file >> BE >> alpha_compare.function >> alpha_compare.op
 			>> alpha_compare.ref0 >> alpha_compare.ref1;
 
-		//std::cout << "alpha compare:\t"
+		//logger << "alpha compare:\t"
 		//	<< " function: " << (int)alpha_compare.function
 		//	<< " op: " << (int)alpha_compare.op << " ref0: " << (int)alpha_compare.ref0
 		//	<< " ref1: " << (int)alpha_compare.ref1 << '\n';
@@ -286,7 +288,7 @@ void Material::Load(std::istream& file) {
 	{
 		file >> BE >> blend_mode.type >> blend_mode.src_factor >> blend_mode.dst_factor >> blend_mode.logical_op;
 
-		//std::cout << "blend mode:\t"
+		//logger << "blend mode:\t"
 		//	<< " type: " << (int)blend_mode.type
 		//	<< " src: " << (int)blend_mode.src_factor << " dst: " << (int)blend_mode.dst_factor
 		//	<< " op: " << (int)blend_mode.logical_op << '\n';
@@ -331,7 +333,7 @@ void Material::ApplyTextures(const Resources &resources) const {
 			auto& palettes = resources.palettes.at(palette_set);
 
 			if (palette_texture[i] >= palettes.size()) {
-				std::cerr
+				logger << LogType::Warning
 					<< "Palette index out of range: "
 					<< static_cast<int>(palette_texture[i])
 					<< "\n";
@@ -369,7 +371,7 @@ void Material::Apply(const Resources& resources) const
 		static std::set<std::string> printed;
 		if (printed.insert(GetName()).second)
 		{
-			std::printf("[blend] material '%s': type=%d src=%d dst=%d op=%d\n",
+			logger.printf("[blend] material '%s': type=%d src=%d dst=%d op=%d\n",
 				GetName().c_str(), static_cast<int>(blend_mode.type),
 				static_cast<int>(blend_mode.src_factor),
 				static_cast<int>(blend_mode.dst_factor),
@@ -549,13 +551,13 @@ void Material::Apply(const Resources& resources) const
 
 void Material::DebugPrintSrts() const
 {
-	std::printf("[trace]     material '%s': %zu texture srt(s)\n",
+	logger.printf("[trace]     material '%s': %zu texture srt(s)\n",
 		GetName().c_str(), texture_srts.size());
 
 	for (size_t i = 0; i != texture_srts.size(); ++i)
 	{
 		const auto& srt = texture_srts[i];
-		std::printf("[trace]       srt[%zu] translate=(%.4f,%.4f) rotate=%.2f "
+		logger.printf("[trace]       srt[%zu] translate=(%.4f,%.4f) rotate=%.2f "
 			"scale=(%.4f,%.4f)\n", i, srt.translate_s, srt.translate_t,
 			srt.rotate, srt.scale_s, srt.scale_t);
 	}
@@ -563,7 +565,7 @@ void Material::DebugPrintSrts() const
 	for (size_t i = 0; i != texture_coord_gens.size(); ++i)
 	{
 		const auto& tcg = texture_coord_gens[i];
-		std::printf("[trace]       texgen[%zu] type=%d src=%d mtx=%d\n", i,
+		logger.printf("[trace]       texgen[%zu] type=%d src=%d mtx=%d\n", i,
 			static_cast<int>(tcg.tgen_type), static_cast<int>(tcg.tgen_src),
 			static_cast<int>(tcg.mtrx_src));
 	}
@@ -600,7 +602,7 @@ void Material::ProcessHermiteKey(const KeyType& type, float value) {
 				&srt.scale_t,
 			};
 
-			std::cout << "IndSrt[" << type.index << "] target=" << type.target
+			logger << "IndSrt[" << type.index << "] target=" << type.target
 		   << " -> S:" << srt.translate_s
 		   << " T:" << srt.translate_t
 		   << " R:" << srt.rotate

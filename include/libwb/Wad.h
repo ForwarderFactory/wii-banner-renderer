@@ -25,7 +25,7 @@ distribution.
 #include <fstream>
 #include <string>
 
-namespace Wad {
+namespace wb::Wad {
     struct ExtractedFile {
         std::string name;
         std::vector<uint8_t> data;

@@ -12,7 +12,7 @@ from WiiFlow and USB Loader GX.
 The project consists of two parts:
 
 - libwb (required)
-  - C++ library which exposes almost all of the banner handling. This, long term, should be cross-platform but that's not the case as of now.
+  - C++ library which exposes almost all the banner handling. This, long term, should be cross-platform but that's not the case as of now.
 - wbr
   - CLI utility which renders a banner to a video file using FFmpeg. Runs on Windows, macOS and Linux.
 - wbp
@@ -28,11 +28,14 @@ Call the program using the path to a *.wad*, *00000000.app* or *opening.bnr* as 
 You can pass in multiple files as well. The output file(s) will bear the name of the input file, with a different file extension, .mp4 and .wav.
 Run it with no parameters for a list of parameters.
 
+If you would like debugging information, set WBR_DEBUG=1 in your environment, or run the program with
+the -log parameter.
+
 Some banners use the Wii's shared bitmap fonts. Pass the shared content archive
 that contains `wbf1.brfna` and `wbf2.brfna` with
 `--font-archive <path>`, or set `WII_FONT_ARCHIVE`. The content filename is not
 fixed, so identify it by those files rather than assuming a particular `.app`
-number. 
+number.
 
 You can also place `00000003.app` and `00000011.app` from `shared1` in the working directory of the program. 
 You can obtain these files easily by installing the Wii System Menu in Dolphin, navigating to the virtual NAND 
@@ -43,6 +46,8 @@ doing this is not possible.
 
 Run the GUI application and select your channels using the + button. You can then use your mouse
 or arrow keys to select channels to view.
+
+If you would like debugging information, set WBP_DEBUG=1 in your environment.
 
 ## Dependencies
 

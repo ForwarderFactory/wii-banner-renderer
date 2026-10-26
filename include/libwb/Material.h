@@ -29,7 +29,7 @@ distribution.
 #include <libwb/Funcs.h>
 #include <libwb/WrapGx.h>
 
-namespace WiiBanner
+namespace wb
 {
 
 class Resources; // forward declaration, Layout.h

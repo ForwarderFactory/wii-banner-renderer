@@ -59,11 +59,11 @@ constexpr int FULL_CANVAS_WIDTH = 1920;
 constexpr int FULL_CANVAS_HEIGHT = 1080;
 constexpr int NO_CHANNEL_INDEX = -1;
 
-constexpr std::array<Point, 4> g_banner_points = {{
+constexpr std::array<wb::Point, 4> g_banner_points = {{
     {1060, 20}, {1060, 403}, {1813, 20}, {1813, 403}
 }};
 
-constexpr std::array<Point, 4> g_icon_points = {{
+constexpr std::array<wb::Point, 4> g_icon_points = {{
     {1060, 0}, {1060, 520}, {1833, 0}, {1833, 520}
 }};
 
@@ -143,7 +143,7 @@ static void fit_rect(float box_w, float box_h, float content_aspect, float& out_
 }
 
 struct IconProcess {
-    WiiBanner::Layout* layout = nullptr;
+    wb::Layout* layout = nullptr;
     GLuint texture = 0;
 
     uint64_t last_advance_ns = 0;
@@ -167,7 +167,7 @@ struct Banner {
     std::filesystem::path wad_extract_dir;
     std::string label;
 
-    WiiBanner::Banner* banner = nullptr;
+    wb::Banner* banner = nullptr;
     IconProcess icon;
 
     void destroy() {
@@ -183,12 +183,12 @@ static bool resolve_channel_path(const std::filesystem::path& input, std::filesy
         if (!in) return false;
 
         out_extract_dir = std::filesystem::temp_directory_path() / ("wbr-menu-" + input.stem().string());
-        Wad::extract_wad(in, out_extract_dir.string());
+        wb::Wad::extract_wad(in, out_extract_dir.string());
 
         for (const auto& entry : std::filesystem::directory_iterator(out_extract_dir)) {
             if (!entry.is_regular_file() || entry.path().extension() != ".app")
                 continue;
-            if (WiiBanner::Banner::is_valid(entry.path().string())) {
+            if (wb::Banner::is_valid(entry.path().string())) {
                 out_app_path = entry.path();
                 return true;
             }
@@ -196,7 +196,7 @@ static bool resolve_channel_path(const std::filesystem::path& input, std::filesy
         return false;
     }
 
-    if (WiiBanner::Banner::is_valid(input.string())) {
+    if (wb::Banner::is_valid(input.string())) {
         out_app_path = input;
         out_extract_dir.clear();
         return true;
@@ -216,7 +216,7 @@ bool try_load_channel(const std::filesystem::path& input, const std::filesystem:
     ch.label = input.stem().string();
 
     try {
-        ch.banner = new WiiBanner::Banner(ch.app_path.string(), font_archive.string());
+        ch.banner = new wb::Banner(ch.app_path.string(), font_archive.string());
         ch.banner->LoadIcon();
         ch.icon.layout = ch.banner->GetIcon();
         if (!ch.icon.layout) {
@@ -262,12 +262,11 @@ static std::deque<Banner> scan_channels(const std::filesystem::path& dir, const 
 enum class RenderPriority : int {
     Thumbnail = 0,
     Hovered = 1,
-    Banner = 2
 };
 
 struct Render {
     IconProcess* visual = nullptr;
-    Rect crop{};
+    wb::Rect crop{};
     bool advance = false;
     RenderPriority priority = RenderPriority::Thumbnail;
 };
@@ -335,8 +334,10 @@ struct RenderQueue {
     }
 };
 
+bool print_logs = false;
+
 static void render_worker(RenderQueue& queue) {
-    Renderer canvas_renderer(FULL_CANVAS_WIDTH, FULL_CANVAS_HEIGHT);
+    wb::Renderer canvas_renderer(FULL_CANVAS_WIDTH, FULL_CANVAS_HEIGHT);
 
     std::unique_lock<std::mutex> lk(queue.mtx);
     while (!queue.stop.load()) {
@@ -448,6 +449,10 @@ int main(int argc, char** argv) {
     std::filesystem::path channel_dir{};
     std::filesystem::path font_archive{};
 
+    if (std::getenv("WBP_DEBUG")) {
+        print_logs = true;
+    }
+
     if (argc >= 2) {
         channel_dir = argv[1];
         font_archive = argc > 2 ? argv[2] : std::filesystem::path{};
@@ -508,8 +513,8 @@ int main(int argc, char** argv) {
 
     std::deque<Banner> channels = scan_channels(channel_dir, font_archive);
 
-    Rect icon_crop = GetCrop(g_icon_points);
-    Rect banner_crop = GetCrop(g_banner_points);
+    wb::Rect icon_crop = GetCrop(g_icon_points);
+    wb::Rect banner_crop = GetCrop(g_banner_points);
 
     RenderQueue queue;
     std::thread renderer_thread(render_worker, std::ref(queue));
@@ -559,7 +564,7 @@ int main(int argc, char** argv) {
 
             ch.banner->LoadBanner();
 
-            WiiBanner::Layout* layout = ch.banner->GetBanner();
+            wb::Layout* layout = ch.banner->GetBanner();
 
             if (!layout)
                 throw std::runtime_error("no banner layout");
@@ -666,6 +671,23 @@ int main(int argc, char** argv) {
 
             active_banner_visual.destroy_texture();
             active_banner_visual.layout = nullptr;
+        }
+
+        if (print_logs) {
+            auto& logger = ch.banner->GetLogger();
+
+            for (const auto& it : logger) {
+                std::string text = it.text;
+
+                while (!text.empty() &&
+                       (text.back() == '\n' || text.back() == '\r')) {
+                    text.pop_back();
+                       }
+
+                std::cout << it.type << ": \"" << text << "\"\n";
+            }
+
+            logger.clear();
         }
     };
 
@@ -958,7 +980,6 @@ int main(int argc, char** argv) {
 
         SDL_GL_SwapWindow(window);
 
-        // 1000 / 60 in whole milliseconds is 16, i.e. 62.5 fps, so work in ns
         constexpr uint64_t target_ns = 1000000000ull / frame_rate;
         const uint64_t elapsed_ns = SDL_GetTicksNS() - last_frame_ns;
 
@@ -966,6 +987,7 @@ int main(int argc, char** argv) {
             SDL_DelayPrecise(target_ns - elapsed_ns);
 
         last_frame_ns = SDL_GetTicksNS();
+
     }
 
     queue.stop.store(true);

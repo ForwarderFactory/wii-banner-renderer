@@ -31,7 +31,7 @@ distribution.
 #include <libwb/Funcs.h>
 #include <libwb/WrapGx.h>
 
-namespace WiiBanner
+namespace wb
 {
 
 struct Resources;

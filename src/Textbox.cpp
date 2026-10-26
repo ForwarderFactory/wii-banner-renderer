@@ -34,11 +34,13 @@ distribution.
 #include <vector>
 
 #include "../include/libwb/Textbox.h"
+
+#include "logger_holder.hpp"
 #include "../include/libwb/Layout.h"
 #include "../include/libwb/Endian.h"
 #include "../include/libwb/Material.h"
 
-namespace WiiBanner
+namespace wb
 {
 
 void Textbox::Load(std::istream& file)
@@ -80,13 +82,13 @@ void Textbox::Load(std::istream& file)
 
 		if (has_control)
 		{
-			std::printf("[text] %zu units:", text.size());
+			logger.printf("[text] %zu units:", text.size());
 			for (char16_t c : text)
-				std::printf(" %04X", static_cast<unsigned>(c));
-			std::printf("\n[text] ascii:   ");
+				logger.printf(" %04X", static_cast<unsigned>(c));
+			logger.printf("\n[text] ascii:   ");
 			for (char16_t c : text)
-				std::printf("%c", (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : '.');
-			std::printf("\n");
+				logger.printf("%c", (c >= 0x20 && c < 0x7f) ? static_cast<char>(c) : '.');
+			logger.printf("\n");
 		}
 	}
 }

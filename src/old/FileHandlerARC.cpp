@@ -204,20 +204,20 @@ bool CARCFile::ParseBuffer(std::istream& file)
 
 	// check ID
 	u32 id;
-	file >> BE >> id;
+	file >> wb::BE >> id; // hack maybe we should just get rid of this file and all this circa 2008 dolphin shit
 
 	if (id != ARC_ID)
 		return false;
 
 	// read header
 	u32 fst_offset, fst_size, file_offset;
-	file >> BE >> fst_offset >> fst_size >> file_offset;
+	file >> wb::BE >> fst_offset >> fst_size >> file_offset;
 
 	file.seekg(file_start + fst_offset, std::ios::beg);
 
 	// read all file infos
 	u32 root_name_offset, root_offset, root_filesize;
-	file >> BE >> root_name_offset >> root_offset >> root_filesize;
+	file >> wb::BE >> root_name_offset >> root_offset >> root_filesize;
 
 	SFileInfo Root;
 	Root.m_NameOffset = root_name_offset;
@@ -236,7 +236,7 @@ bool CARCFile::ParseBuffer(std::istream& file)
 			//u8* Offset = m_pBuffer + fst_offset + (i * 0xC);
 
 			u32 name_offset, offset, filesize;
-			file >> BE >> name_offset >> offset >> filesize;
+			file >> wb::BE >> name_offset >> offset >> filesize;
 
 			m_FileInfoVector[i].m_NameOffset = name_offset;
 			m_FileInfoVector[i].m_Offset = offset;

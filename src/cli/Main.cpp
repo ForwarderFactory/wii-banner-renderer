@@ -1,5 +1,4 @@
 /*
-Copyright (c) 2010 - Wii Banner Player Project
 Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
@@ -59,8 +58,9 @@ struct Settings {
 	bool icon = false; // icon, self explanatory
 	double resolution_multiplier = 1; // resolution multiplier
 	bool webm = false; // output to webm
+	bool logging = false; // enable logging?
 	bool sound_only = false; // sound only
-	std::filesystem::path font_archive; // Wii shared font content archive
+	std::filesystem::path font_archive; // app archives from shared1/
 
 	void print_settings() const {
 		std::cout << "FPS: " << fps << "\n";
@@ -73,6 +73,7 @@ struct Settings {
 		std::cout << "No crop: " << no_crop << "\n";
 		std::cout << "Resolution multiplier: " << resolution_multiplier << "\n";
 		std::cout << "Sound only: " << sound_only << "\n";
+		std::cout << "Logging: " << logging << "\n";
 		std::cout << "Font archive: "
 			<< (font_archive.empty() ? "auto" : font_archive.string()) << "\n";
 	}
@@ -91,6 +92,20 @@ int get_proc() {
 #endif
 }
 
+void print_logs(wb::Logger& logger) {
+	for (const auto& it : logger) {
+		std::string text = it.text;
+
+		while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+			text.pop_back();
+		}
+
+		std::cout << it.type << ": \"" << text << "\"\n";
+	}
+
+	logger.clear();
+}
+
 int process(const Render& input_opening, Settings settings = {}) {
 	std::filesystem::path opening = input_opening.input;
 
@@ -107,7 +122,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 			return EXIT_FAILURE;
 		}
 
-		Wad::extract_wad(in, extraction_dir.string());
+		wb::Wad::extract_wad(in, extraction_dir.string());
 
 		for (const auto& entry : std::filesystem::directory_iterator(extraction_dir))
 		{
@@ -119,7 +134,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 			const std::string path = entry.path().string();
 
-			if (WiiBanner::Banner::is_valid(path)) {
+			if (wb::Banner::is_valid(path)) {
 				opening = path;
 				break;
 			}
@@ -158,22 +173,30 @@ int process(const Render& input_opening, Settings settings = {}) {
 	}
 
 	if (settings.sound_only) {
-		WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+		wb::Banner banner(opening.string(), settings.font_archive.string());
+
 		banner.LoadSound();
+
 		if (banner.GetSound()) {
 			banner.GetSound()->WriteWAV(base_filename + ".wav");
 			std::cerr << "Extracted audio\n";
 		} else {
+			if (settings.logging)
+				print_logs(banner.GetLogger());
+
 			std::cerr << "Failed to extract audio, exiting...\n";
 			return EXIT_FAILURE;
 		}
 
+		if (settings.logging)
+			print_logs(banner.GetLogger());
+
 		return EXIT_SUCCESS;
 	}
 
-  Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+	wb::Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
 
-  WiiBanner::Banner banner(opening.string(), settings.font_archive.string());
+	wb::Banner banner(opening.string(), settings.font_archive.string());
 
 	if (settings.icon) {
 		banner.LoadIcon();
@@ -185,7 +208,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 	if (!settings.no_audio)
 		banner.LoadSound();
 
-	WiiBanner::Layout* layout = settings.icon ? banner.GetIcon() : banner.GetBanner();
+	wb::Layout* layout = settings.icon ? banner.GetIcon() : banner.GetBanner();
 	if (!layout) {
 		throw std::runtime_error{"layout == nullptr"};
 	}
@@ -218,21 +241,21 @@ int process(const Render& input_opening, Settings settings = {}) {
 		);
 	}
 
-	std::array<Point, 4> points = {{
+	std::array<wb::Point, 4> points = {{
 		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
 		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
 		{1813 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
 		{1813 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
 	}};
 
-	std::array<Point, 4> points_icon = {{
+	std::array<wb::Point, 4> points_icon = {{
 		{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
 		{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier},
 		{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
 		{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}
 	}};
 
-	Rect crop;
+	wb::Rect crop{};
 
 	if (settings.no_crop) {
 		crop = {
@@ -278,6 +301,9 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	encoder.finish();
 
+	if (settings.logging)
+		print_logs(banner.GetLogger());
+
     banner.UnloadBanner();
 
 	// clean temp files and directories TODO: dont write wav to disk at all
@@ -319,6 +345,7 @@ int main(int argc, char** argv) {
 		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
 		std::cout << "-font/--font-archive <path>:        Wii shared font archive containing wbf1.brfna and wbf2.brfna.\n";
     	std::cout << "-webm/--webm:                       Output in .webm format (VP9)\n";
+    	std::cout << "-log/--log:                         Enable logging for debugging\n";
     	std::cout << "\n";
     	std::cout << "Files are output in the working directory and bear the name of the input file (with a different file extension) by default.\n";
     	std::cout << "You can pass in -o <path> after the input file to specify an output path.\n";
@@ -332,6 +359,10 @@ int main(int argc, char** argv) {
 
 	Settings settings{};
 	std::vector<Render> openings;
+
+	if (std::getenv("WBR_DEBUG")) {
+		settings.logging = true;
+	}
 
 	for (int i = 1; i < argc; i++) {
 		std::string arg = argv[i];
@@ -355,6 +386,8 @@ int main(int argc, char** argv) {
 		} else if (arg == "-nc" || arg == "--no-crop") {
 			// no crop
 			settings.no_crop = true;
+		} else if (arg == "-log" || arg == "--log") {
+			settings.logging = true;
 		} else if (arg == "-so" || arg == "--sound-only") {
 			settings.sound_only = true;
 		} else if (arg == "-i" || arg == "--icon") {
@@ -500,7 +533,9 @@ int main(int argc, char** argv) {
 	}
 
 	std::cout << "Settings:\n";
-	settings.print_settings();
+
+	if (settings.logging)
+		settings.print_settings();
 
 	int ret_val = EXIT_SUCCESS;
 	for (const auto& it : openings) {

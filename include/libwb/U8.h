@@ -37,7 +37,7 @@ distribution.
 #include "Yaz0.h"
 #include "LZ77.h"
 
-namespace u8archive
+namespace wb::u8archive
 {
 
 namespace detail
