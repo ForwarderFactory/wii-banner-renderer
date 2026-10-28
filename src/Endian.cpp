@@ -1,5 +1,6 @@
 /*
 Copyright (c) 2010 - Wii Banner Player Project
+Copyright (c) 2026 - Jacob Nilsson
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -20,44 +21,44 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source
 distribution.
 */
-
-// from dolphin
-#include "CommonFuncs.h"
-
 #include "../include/libwb/Endian.h"
+
+#include <cstring>
 
 namespace wb {
 	BEStreamManip BE;
 	LEStreamManip LE;
 
 	template <>
-	void SwapData<1>(u8* data)
+	void SwapData<1>(uint8_t* data)
 	{
 		// nothing
 	}
 
 	template <>
-	void SwapData<2>(u8* data)
+	void SwapData<2>(uint8_t* data)
 	{
-		*reinterpret_cast<u16*>(data) = Common::swap16(data);
+		std::reverse(data, data + 2);
 	}
 
 	template <>
-	void SwapData<4>(u8* data)
+	void SwapData<4>(uint8_t* data)
 	{
-		*reinterpret_cast<u32*>(data) = Common::swap32(data);
+		std::reverse(data, data + 4);
 	}
 
 	template <>
-	void SwapData<8>(u8* data)
+	void SwapData<8>(uint8_t* data)
 	{
-		*reinterpret_cast<u64*>(data) = Common::swap64(data);
+		std::reverse(data, data + 8);
 	}
 
 	std::ostream& operator<<(std::ostream& lhs, const FourCC& rhs)
 	{
-		const u32 data = Common::swap32(rhs.data);
-		lhs.write(reinterpret_cast<const char*>(&data), 4);
+		uint8_t bytes[4];
+		std::memcpy(bytes, &rhs.data, 4);
+		std::reverse(bytes, bytes + 4);
+		lhs.write(reinterpret_cast<const char*>(bytes), 4);
 		return lhs;
 	}
 }

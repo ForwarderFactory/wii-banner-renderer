@@ -9,16 +9,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(WB_BUILD_PLAYER ON)
-set(WB_BUILD_CLI ON)
+option(WB_BUILD_PLAYER "Build the SDL player" ON)
+option(WB_BUILD_CLI "Build the command-line interface" ON)
 
 add_library(wb STATIC
-        src/old/Blob.cpp
-        src/old/CDUtils.cpp
-        src/old/FileBlob.cpp
-        src/old/FileHandlerARC.cpp
-        src/old/TextureDecoder.cpp
-
+        src/GXTexture.cpp
         src/Animator.cpp
         src/Banner.cpp
         src/Endian.cpp

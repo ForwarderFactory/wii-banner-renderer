@@ -323,6 +323,18 @@ public:
       return long(it->second);
    }
 
+   // Where a file's stored data starts, counted from the start of the archive
+   // (its U8 header). Returns 0 if the archive has no such file. The data is
+   // not decompressed, this is the position of the bytes as stored.
+   uint32_t GetFileOffset(const std::string& path) const
+   {
+      const long entry = FindFile(path);
+      if (entry < 0 || entries[size_t(entry)].directory)
+         return 0;
+
+      return entries[size_t(entry)].offset;
+   }
+
    bool ReadFileRaw(size_t entry, const uint8_t** data, uint32_t* size) const
    {
       if (entry >= entries.size() || entries[entry].directory)

@@ -446,18 +446,24 @@ static void SDLCALL on_files_selected(void* userdata, const char* const* filelis
 int hovered_index = -1;
 
 int main(int argc, char** argv) {
-    std::filesystem::path channel_dir{};
+    std::filesystem::path channel_dir{"."};
     std::filesystem::path font_archive{};
+    bool draw_all_icons = false;
 
     if (std::getenv("WBP_DEBUG")) {
         print_logs = true;
     }
 
-    if (argc >= 2) {
-        channel_dir = argv[1];
-        font_archive = argc > 2 ? argv[2] : std::filesystem::path{};
-    } else {
-        channel_dir = std::filesystem::current_path();
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "-a" || std::string_view(argv[i]) == "--draw-all-icons") {
+            draw_all_icons = true;
+        } else if (channel_dir.empty()) {
+            channel_dir = argv[i];
+        } else if (font_archive.empty()) {
+            font_archive = argv[i];
+        } else if (std::string_view(argv[i]) == "-log" || std::string_view(argv[i]) == "--log") {
+            print_logs = true;
+        }
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
@@ -626,11 +632,6 @@ int main(int argc, char** argv) {
                             if (sound->HasLoop() && total_frames > 0) {
                                 const int64_t loop_start = sound->GetLoopStart();
                                 int64_t loop_end = sound->GetLoopEnd();
-
-                                // sometimes libwb returns 0 here, idk why but this fixes it
-                                if (loop_end == 0 && total_frames > 0) {
-                                    loop_end = total_frames;
-                                }
 
                                 if (loop_start >= 0 &&
                                     loop_end > loop_start &&
@@ -899,8 +900,7 @@ int main(int argc, char** argv) {
 
 
                 const int animated_index = hovered_index >= 0 ? hovered_index : selected_index;
-
-                const bool animate = static_cast<int>(i) == animated_index;
+                const bool animate = static_cast<int>(i) == animated_index || draw_all_icons;
 
                 if (animate || icon.texture == 0) {
                     queue.submit(Render{

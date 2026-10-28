@@ -260,10 +260,10 @@ int process(const Render& input_opening, Settings settings = {}) {
 
 	if (settings.no_crop) {
 		crop = {
-			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
-			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier),
 			0,
-			0
+			0,
+			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
+			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier)
 		};
 	}
 	else
@@ -293,7 +293,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 
     	encoder.writeVideoFrame(renderer.GetFrameData(crop).data());
 
-    	// more possible debugging here
+    	// this probably shouldnt be here?
     	if (i % 30 == 0)
     		layout->DebugTrace(std::getenv("WB_PANE_TRACE"));
 

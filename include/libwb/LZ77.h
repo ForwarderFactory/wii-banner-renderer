@@ -33,7 +33,7 @@ distribution.
 #include "Endian.h"
 #include "Types.h"
 
-enum : u32
+enum : uint32_t
 {
     BINARY_MAGIC_LZ77 = MAKE_FOURCC('L', 'Z', '7', '7')
 };
@@ -119,7 +119,7 @@ inline bool Decompress(const uint8_t* data, size_t size, std::vector<uint8_t>& o
 
 inline bool Decompress(const std::vector<uint8_t>& in, std::vector<uint8_t>& out)
 {
-   return Decompress(in.empty() ? NULL : &in[0], in.size(), out);
+   return Decompress(in.empty() ? nullptr : &in[0], in.size(), out);
 }
 
 }  // namespace wb::lz77
@@ -130,9 +130,9 @@ namespace wb {
    public:
       LZ77Decompressor(std::istream& in)
       {
-         constexpr u32 TYPE_LZ77 = 1;
+         constexpr uint32_t TYPE_LZ77 = 1;
 
-         u32 magic;
+         uint32_t magic;
          in >> BE >> magic;
 
          if (magic != BINARY_MAGIC_LZ77)
@@ -145,32 +145,32 @@ namespace wb {
 
          ret_stream = &data;
 
-         u32 hdr;
+         uint32_t hdr;
          in >> LE >> hdr;
 
-         const u32 uncompressed_length = hdr >> 8;
-         const u32 compression_type = hdr >> 4 & 0xf;
+         const uint32_t uncompressed_length = hdr >> 8;
+         const uint32_t compression_type = hdr >> 4 & 0xf;
 
          if (TYPE_LZ77 != compression_type)
             return;
 
-         u32 written = 0;
+         uint32_t written = 0;
          while (written != uncompressed_length)
          {
-            u8 flags = in.get();
+            uint8_t flags = in.get();
             for (int f = 0; f != 8; ++f)
             {
                if (flags & 0x80)
                {
-                  u16 info;
+                  uint16_t info;
                   in >> BE >> info;
 
-                  const u8 num = 3 + (info >> 12);
-                  const u16 disp = info & 0xFFF;
-                  u32 ptr = written - disp - 1;
+                  const uint8_t num = 3 + (info >> 12);
+                  const uint16_t disp = info & 0xFFF;
+                  uint32_t ptr = written - disp - 1;
 
                   data.seekg(ptr, std::ios::beg);
-                  for (u8 p = 0; p != num; ++p)
+                  for (uint8_t p = 0; p != num; ++p)
                   {
                      char c;
                      data.get(c);

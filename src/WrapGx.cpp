@@ -39,43 +39,41 @@ distribution.
 #include <vector>
 #include <sstream>
 
-// from dolphin
-#include "TextureDecoder.h"
-
 #include "../include/libwb/WrapGx.h"
 
 #include "logger_holder.hpp"
 #include "../include/libwb/Funcs.h"
+#include "libwb/GXTexture.h"
 
-static u8 g_texture_decode_buffer[1024 * 1024 * 4];
+static uint8_t g_texture_decode_buffer[1024 * 1024 * 4];
 
 static float g_color_registers[3][4];
 static float g_kcolor_registers[4][4];
-static u8 g_tev_swap_tables[4] = { 0xe4, 0xc0, 0xd5, 0xea };
+static uint8_t g_tev_swap_tables[4] = { 0xe4, 0xc0, 0xd5, 0xea };
 
 struct IndTexOrder
 {
-	u8 tex_coord = 0xFF;
-	u8 tex_map = 0xFF;
+	uint8_t tex_coord = 0xFF;
+	uint8_t tex_map = 0xFF;
 };
 
 struct IndTexCoordScale
 {
-	u8 scale_s = GX_ITS_1;
-	u8 scale_t = GX_ITS_1;
+	uint8_t scale_s = GX_ITS_1;
+	uint8_t scale_t = GX_ITS_1;
 };
 
 struct IndTexMtx
 {
 	f32 m[2][3] = {};
-	s8 scale_exp = 0;
+	int8_t scale_exp = 0;
 	bool set = false;
 };
 
 static IndTexOrder g_ind_tex_order[4];
 static IndTexCoordScale g_ind_tex_coord_scale[4];
 static IndTexMtx g_ind_tex_mtx[12];
-static u8 g_num_ind_stages = 0;
+static uint8_t g_num_ind_stages = 0;
 
 // TODO: make this 0, currently causes issues though, figure that out :p
 static constexpr GLuint g_texmap_start_index = 1;
@@ -83,7 +81,7 @@ static constexpr GLuint g_texmap_start_index = 1;
 //static GLuint g_clip_texture;
 
 // silly
-GXFifoObj * 	GX_Init (void *base, u32 size)
+GXFifoObj * 	GX_Init (void *base, uint32_t size)
 {
 	glewInit();
 
@@ -91,7 +89,7 @@ GXFifoObj * 	GX_Init (void *base, u32 size)
 
 	//glActiveTexture(GL_TEXTURE0);
 	//glBindTexture(GL_TEXTURE_2D, g_clip_texture);
-	//u8 pixels[1] = { 0xff };
+	//uint8_t pixels[1] = { 0xff };
 	//glTexImage2D(GL_TEXTURE_2D, g_clip_texture, GL_ALPHA, 1, 1, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels);
 
 	//TexDecoder_SetTexFmtOverlayOptions(true, false);
@@ -110,11 +108,11 @@ GXFifoObj * 	GX_Init (void *base, u32 size)
 struct TlutObj
 {
 	void* lut;
-	u16 entries;
-	u8 fmt;
+	uint16_t entries;
+	uint8_t fmt;
 };
 
-std::map<u32, TlutObj> g_tlut_names;
+std::map<uint32_t, TlutObj> g_tlut_names;
 
 struct GLTexObj
 {
@@ -122,18 +120,18 @@ struct GLTexObj
 
 	mutable GLuint tex; // ugly
 
-	u16 wd, ht;
-	u8 fmt;
-	u32 tlut_name;
-	u8 wrap_s, wrap_t;
-	u8 minfilt, magfilt;
+	uint16_t wd, ht;
+	uint8_t fmt;
+	uint32_t tlut_name;
+	uint8_t wrap_s, wrap_t;
+	uint8_t minfilt, magfilt;
 
-	u8 mipmap = 0;
-	u8 max_lod = 0;
+	uint8_t mipmap = 0;
+	uint8_t max_lod = 0;
 	f32 min_lod = 0.0f;
 	f32 lod_bias = 0.0f;
-	u8 bias_clamp = 0;
-	u8 edge_lod = 0;
+	uint8_t bias_clamp = 0;
+	uint8_t edge_lod = 0;
 
 	GLTexObj() : img_ptr(nullptr), tex(0), wd(0), ht(0), fmt(0), tlut_name(0), wrap_s(0), wrap_t(0), minfilt(0),
 	             magfilt(0) {
@@ -153,132 +151,126 @@ struct GLTexObj
 	void Bind() const
 	{
 		if (tex)
-			glBindTexture(GL_TEXTURE_2D, tex);
-		else
 		{
-			glGenTextures(1, &tex);
 			glBindTexture(GL_TEXTURE_2D, tex);
+			return;
+		}
 
-			// copy palette data
-			const auto& tlut = g_tlut_names[tlut_name];
-			if (tlut.lut)
-				memcpy(texMem, tlut.lut, tlut.entries * 2);
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
 
-			GLenum gl_format = 0, gl_iformat = 0, gl_type = 0;
+		// the palette, for the colour index formats
+		const auto& tlut = g_tlut_names[tlut_name];
 
-			const u32 num_levels = mipmap ? (u32(max_lod) + 1) : 1;
+		wb::TexturePalette palette;
+		palette.data = static_cast<const uint8_t*>(tlut.lut);
+		palette.entries = tlut.entries;
+		palette.format = tlut.fmt;
 
-			u32 level_width = wd;
-			u32 level_height = ht;
-			const u8* level_src = reinterpret_cast<const u8*>(img_ptr);
+		const uint32_t num_levels = mipmap ? (uint32_t(max_lod) + 1) : 1;
 
-			for (u32 level = 0; level < num_levels; ++level)
+		uint32_t level_width = wd;
+		uint32_t level_height = ht;
+		const uint8_t* level_src = reinterpret_cast<const uint8_t*>(img_ptr);
+
+		// rows of the decoded levels are tightly packed, not padded to 4 bytes
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+		for (uint32_t level = 0; level < num_levels; ++level)
+		{
+			// textures are stored in whole blocks, so the stored size is rounded up
+			const uint32_t expanded_width  = wb::RoundUp(level_width, wb::GxBlockWidth(fmt));
+			const uint32_t expanded_height = wb::RoundUp(level_height, wb::GxBlockHeight(fmt));
+
+			wb::DecodedFormat decoded = wb::DecodedFormat::Invalid;
+
+			if (expanded_width && expanded_height &&
+				(size_t(expanded_width) * expanded_height * 4) <= sizeof(g_texture_decode_buffer))
 			{
-				const u32 expanded_width  = wb::RoundUp(level_width, TexDecoder_GetBlockWidthInTexels(fmt)); // TODO: GX should own this
-				const u32 expanded_height = wb::RoundUp(level_height, TexDecoder_GetBlockHeightInTexels(fmt)); // and also this
-
-				// decode this level
-				auto const pcfmt = TexDecoder_Decode(g_texture_decode_buffer,
-					level_src, expanded_width, expanded_height, fmt, 0, tlut.fmt);
-
-				switch (pcfmt)
-				{
-				default:
-				case PC_TEX_FMT_NONE:
-					wb::logger << wb::LogType::Warning << "Error decoding texture!!!\n";
-
-				case PC_TEX_FMT_BGRA32:
-					gl_format = GL_BGRA;
-					gl_iformat = 4;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_RGBA32:
-					gl_format = GL_RGBA;
-					gl_iformat = 4;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_I4_AS_I8:
-					gl_format = GL_LUMINANCE;
-					gl_iformat = GL_INTENSITY4;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_IA4_AS_IA8:
-					gl_format = GL_LUMINANCE_ALPHA;
-					gl_iformat = GL_LUMINANCE4_ALPHA4;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_I8:
-					gl_format = GL_LUMINANCE;
-					gl_iformat = GL_INTENSITY8;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_IA8:
-					gl_format = GL_LUMINANCE_ALPHA;
-					gl_iformat = GL_LUMINANCE8_ALPHA8;
-					gl_type = GL_UNSIGNED_BYTE;
-					break;
-
-				case PC_TEX_FMT_RGB565:
-					gl_format = GL_RGB;
-					gl_iformat = GL_RGB;
-					gl_type = GL_UNSIGNED_SHORT_5_6_5;
-					break;
-				}
-
-				if (expanded_width != level_width)
-					glPixelStorei(GL_UNPACK_ROW_LENGTH, expanded_width);
-
-				glTexImage2D(GL_TEXTURE_2D, level, gl_iformat, level_width, level_height, 0, gl_format, gl_type, g_texture_decode_buffer);
-
-				if (expanded_width != level_width)
-					glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-				level_src += TexDecoder_GetTextureSizeInBytes(expanded_width, expanded_height, fmt);
-				level_width  = std::max<u32>(1, level_width  >> 1);
-				level_height = std::max<u32>(1, level_height >> 1);
+				decoded = wb::DecodeGxTexture(g_texture_decode_buffer, level_src,
+					expanded_width, expanded_height, fmt, tlut.lut ? &palette : nullptr);
 			}
 
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, GLint(num_levels - 1));
+			GLenum gl_format = GL_RGBA;
+			GLenum gl_iformat = GL_RGBA8;
+
+			switch (decoded)
+			{
+			case wb::DecodedFormat::Luminance8:
+				// intensity formats also use their value as alpha
+				gl_format = GL_LUMINANCE;
+				gl_iformat = GL_INTENSITY8;
+				break;
+
+			case wb::DecodedFormat::LuminanceAlpha8:
+				gl_format = GL_LUMINANCE_ALPHA;
+				gl_iformat = GL_LUMINANCE8_ALPHA8;
+				break;
+
+			case wb::DecodedFormat::Rgba8:
+				break;
+
+			default:
+				// not a texture we can decode: make it fully transparent
+				std::cout << "Error decoding texture!!! (format " << int(fmt) << ")\n";
+				std::memset(g_texture_decode_buffer, 0,
+					std::min<size_t>(sizeof(g_texture_decode_buffer), size_t(level_width) * level_height * 4));
+				break;
+			}
+
+			// the decoded pixels are rows of expanded_width pixels, of which only
+			// the first level_width are part of the texture
+			const uint32_t row_length = decoded == wb::DecodedFormat::Invalid ? level_width : expanded_width;
+
+			if (row_length != level_width)
+				glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
+
+			glTexImage2D(GL_TEXTURE_2D, level, gl_iformat, level_width, level_height, 0, gl_format,
+				GL_UNSIGNED_BYTE, g_texture_decode_buffer);
+
+			if (row_length != level_width)
+				glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+			level_src += wb::GxTextureSize(expanded_width, expanded_height, fmt);
+			level_width  = std::max<uint32_t>(1, level_width  >> 1);
+			level_height = std::max<uint32_t>(1, level_height >> 1);
 		}
+
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, GLint(num_levels - 1));
 	}
 };
 
 std::set<GLTexObj> g_texture_cache;
 
-u32 	GX_GetTexBufferSize (u16 wd, u16 ht, u32 fmt, u8 mipmap, u8 maxlod)
-{
-	const u32 num_levels = mipmap ? (u32(maxlod) + 1) : 1;
+uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t mipmap, uint8_t maxlod) {
+	const uint32_t num_levels = mipmap ? (uint32_t(maxlod) + 1) : 1;
 
-	u32 total = 0;
-	u32 level_w = wd;
-	u32 level_h = ht;
+	uint32_t total = 0;
+	uint32_t level_w = wd;
+	uint32_t level_h = ht;
 
-	for (u32 level = 0; level < num_levels; ++level)
-	{
-		total += TexDecoder_GetTextureSizeInBytes(
-			wb::RoundUp(level_w, TexDecoder_GetBlockWidthInTexels(fmt)), // TODO: GX should own this
-			wb::RoundUp(level_h, TexDecoder_GetBlockHeightInTexels(fmt)), fmt); // this too
+	for (uint32_t level = 0; level < num_levels; ++level) {
+		total += wb::GxTextureSize(
+			wb::RoundUp(level_w, wb::GxBlockWidth(fmt)),
+			wb::RoundUp(level_h, wb::GxBlockHeight(fmt)), fmt);
 
-		level_w = std::max<u32>(1, level_w >> 1);
-		level_h = std::max<u32>(1, level_h >> 1);
+		level_w = std::max<uint32_t>(1, level_w >> 1);
+		level_h = std::max<uint32_t>(1, level_h >> 1);
 	}
 
 	return total;
 }
 
-void 	GX_InitTexObjTlut (GXTexObj *obj, u32 tlut_name)
+void 	GX_InitTexObjTlut (GXTexObj *obj, uint32_t tlut_name)
 {
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.tlut_name = tlut_name;
 }
 
-void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, u8 fmt, u16 entries)
+void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, uint8_t fmt, uint16_t entries)
 {
 	TlutObj& tlutobj = *reinterpret_cast<TlutObj*>(obj);
 
@@ -287,14 +279,14 @@ void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, u8 fmt, u16 entries)
 	tlutobj.entries = entries;
 }
 
-void 	GX_LoadTlut (GXTlutObj *obj, u32 tlut_name)
+void 	GX_LoadTlut (GXTlutObj *obj, uint32_t tlut_name)
 {
 	TlutObj& tlutobj = *reinterpret_cast<TlutObj*>(obj);
 
 	g_tlut_names[tlut_name] = tlutobj;
 }
 
-void 	GX_InitTexObj (GXTexObj *obj, void *img_ptr, u16 wd, u16 ht, u8 fmt, u8 wrap_s, u8 wrap_t, u8 mipmap)
+void 	GX_InitTexObj (GXTexObj *obj, void *img_ptr, uint16_t wd, uint16_t ht, uint8_t fmt, uint8_t wrap_s, uint8_t wrap_t, uint8_t mipmap)
 {
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
@@ -322,7 +314,7 @@ void 	GX_InitTexObj (GXTexObj *obj, void *img_ptr, u16 wd, u16 ht, u8 fmt, u8 wr
 	//GX_InitTexObjWrapMode(obj, wrap_s, wrap_t);
 }
 
-void 	GX_InitTexObjWrapMode (GXTexObj *obj, u8 wrap_s, u8 wrap_t)
+void 	GX_InitTexObjWrapMode (GXTexObj *obj, uint8_t wrap_s, uint8_t wrap_t)
 {
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
@@ -330,7 +322,7 @@ void 	GX_InitTexObjWrapMode (GXTexObj *obj, u8 wrap_s, u8 wrap_t)
 	txobj.wrap_t = wrap_t;
 }
 
-void 	GX_InitTexObjFilterMode (GXTexObj *obj, u8 minfilt, u8 magfilt)
+void 	GX_InitTexObjFilterMode (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt)
 {
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
@@ -338,20 +330,20 @@ void 	GX_InitTexObjFilterMode (GXTexObj *obj, u8 minfilt, u8 magfilt)
 	txobj.magfilt = magfilt;
 }
 
-void 	GX_InitTexObjLOD (GXTexObj *obj, u8 minfilt, u8 magfilt, f32 minlod, f32 maxlod, f32 lodbias, u8 biasclamp, u8 edgelod, u8 maxaniso)
+void 	GX_InitTexObjLOD (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt, f32 minlod, f32 maxlod, f32 lodbias, uint8_t biasclamp, uint8_t edgelod, uint8_t maxaniso)
 {
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.minfilt = minfilt;
 	txobj.magfilt = magfilt;
 	txobj.min_lod = minlod;
-	txobj.max_lod = u8(maxlod);
+	txobj.max_lod = uint8_t(maxlod);
 	txobj.lod_bias = lodbias;
 	txobj.bias_clamp = biasclamp;
 	txobj.edge_lod = edgelod;
 }
 
-void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
+void 	GX_SetBlendMode (uint8_t type, uint8_t src_fact, uint8_t dst_fact, uint8_t op)
 {
 	static const GLenum blend_types[] =
 	{
@@ -424,7 +416,7 @@ void 	GX_SetBlendMode (u8 type, u8 src_fact, u8 dst_fact, u8 op)
 }
 
 // TODO: incomplete
-void 	GX_SetAlphaCompare (u8 comp0, u8 ref0, u8 aop, u8 comp1, u8 ref1)
+void 	GX_SetAlphaCompare (uint8_t comp0, uint8_t ref0, uint8_t aop, uint8_t comp1, uint8_t ref1)
 {
 	static const GLenum alpha_funcs[] =
 	{
@@ -454,52 +446,52 @@ struct TevStageProps
 	}
 
 	// color inputs
-	u8 color_a : 4;
-	u8 color_b : 4;
+	uint8_t color_a : 4;
+	uint8_t color_b : 4;
 
-	u8 color_c : 4;
-	u8 color_d : 4;
+	uint8_t color_c : 4;
+	uint8_t color_d : 4;
 
 	// alpha inputs
-	u8 alpha_a : 4;
-	u8 alpha_b : 4;
+	uint8_t alpha_a : 4;
+	uint8_t alpha_b : 4;
 
-	u8 alpha_c : 4;
-	u8 alpha_d : 4;
+	uint8_t alpha_c : 4;
+	uint8_t alpha_d : 4;
 
 	// tevops
-	u8 color_op : 4;
-	u8 alpha_op : 4;
+	uint8_t color_op : 4;
+	uint8_t alpha_op : 4;
 
 	// operations and outputs
-	u8 color_bias;
-	u8 color_scale;
-	u8 color_clamp;
-	u8 color_regid;
-	u8 alpha_bias;
-	u8 alpha_scale;
-	u8 alpha_clamp;
-	u8 alpha_regid;
-	u8 kcolor_sel;
-	u8 kalpha_sel;
-	u8 ras_swap;
-	u8 tex_swap;
+	uint8_t color_bias;
+	uint8_t color_scale;
+	uint8_t color_clamp;
+	uint8_t color_regid;
+	uint8_t alpha_bias;
+	uint8_t alpha_scale;
+	uint8_t alpha_clamp;
+	uint8_t alpha_regid;
+	uint8_t kcolor_sel;
+	uint8_t kalpha_sel;
+	uint8_t ras_swap;
+	uint8_t tex_swap;
 
-	u8 texcoord;
+	uint8_t texcoord;
 
-	u8 texmap;
+	uint8_t texmap;
 
-	u8 ind_texid : 2;
-	u8 ind_format : 2;
-	u8 ind_bias : 3;
-	u8 ind_addprev : 1;
+	uint8_t ind_texid : 2;
+	uint8_t ind_format : 2;
+	uint8_t ind_bias : 3;
+	uint8_t ind_addprev : 1;
 
-	u8 ind_mtxid : 4;
-	u8 ind_alpha : 2;
-	u8 ind_pad : 2;
+	uint8_t ind_mtxid : 4;
+	uint8_t ind_alpha : 2;
+	uint8_t ind_pad : 2;
 
-	u8 ind_wrap_s;
-	u8 ind_wrap_t;
+	uint8_t ind_wrap_s;
+	uint8_t ind_wrap_t;
 
 	bool operator<(const TevStageProps& rhs) const
 	{
@@ -512,9 +504,9 @@ typedef std::vector<TevStageProps> TevStages;
 // one entry per active GX_TEXCOORDn slot, as set by GX_SetTexCoordGen
 struct TexGenProps
 {
-	u8 tgen_typ;
-	u8 tgen_src;
-	u8 mtxsrc;
+	uint8_t tgen_typ;
+	uint8_t tgen_src;
+	uint8_t mtxsrc;
 
 	bool operator<(const TexGenProps& rhs) const
 	{
@@ -526,10 +518,10 @@ typedef std::vector<TexGenProps> TexGens;
 
 struct IndStageProps
 {
-	u8 tex_coord = 0xFF;
-	u8 tex_map = 0xFF;
-	u8 scale_s = GX_ITS_1;
-	u8 scale_t = GX_ITS_1;
+	uint8_t tex_coord = 0xFF;
+	uint8_t tex_map = 0xFF;
+	uint8_t scale_s = GX_ITS_1;
+	uint8_t scale_t = GX_ITS_1;
 
 	bool operator<(const IndStageProps& rhs) const
 	{
@@ -846,7 +838,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 
 		static const char components[] = { 'r', 'g', 'b', 'a' };
-		auto const write_swizzle = [&](u8 swap)
+		auto const write_swizzle = [&](uint8_t swap)
 		{
 			for (unsigned int i = 0; i != 4; ++i)
 				frag_ss << components[(swap >> (i * 2)) & 3];
@@ -873,7 +865,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		else
 		{
 			static const char* const swizzles[] = { "rrr", "ggg", "bbb", "aaa" };
-			const u8 selector = stage.kcolor_sel - 16;
+			const uint8_t selector = stage.kcolor_sel - 16;
 			frag_ss << "color_constant.rgb = kcolors[" << (int)(selector & 3) << "]."
 				<< swizzles[selector >> 2] << ";";
 		}
@@ -885,7 +877,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		else
 		{
 			static const char components[] = { 'r', 'g', 'b', 'a' };
-			const u8 selector = stage.kalpha_sel - 16;
+			const uint8_t selector = stage.kalpha_sel - 16;
 			frag_ss << "color_constant.a = kcolors[" << (int)(selector & 3) << "]."
 				<< components[selector >> 2] << ";";
 		}
@@ -909,7 +901,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 			<< color_inputs[stage.color_d] << ','
 			<< alpha_inputs[stage.alpha_d] << ");";
 
-		auto const write_tevop = [&](u8 tevop, u8 tevbias, u8 tevscale, u8 clamp, const char swiz[])
+		auto const write_tevop = [&](uint8_t tevop, uint8_t tevbias, uint8_t tevscale, uint8_t clamp, const char swiz[])
 		{
 			std::string condition_end(" ? c : vec4(0.0))");
 			condition_end += swiz;
@@ -1086,7 +1078,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	//std::cin.get();
 }
 
-void 	GX_LoadTexObj (GXTexObj *obj, u8 mapid)
+void 	GX_LoadTexObj (GXTexObj *obj, uint8_t mapid)
 {
 	const GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
@@ -1142,12 +1134,12 @@ void 	GX_LoadTexObj (GXTexObj *obj, u8 mapid)
 	}
 }
 
-inline void ActiveStage(u8 stage)
+inline void ActiveStage(uint8_t stage)
 {
 	g_active_stages.resize(std::max(g_active_stages.size(), (size_t)stage + 1));
 }
 
-void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color)
+void 	GX_SetTevOrder (uint8_t tevstage, uint8_t texcoord, uint32_t texmap, uint8_t color)
 {
 	ActiveStage(tevstage);
 
@@ -1158,7 +1150,7 @@ void 	GX_SetTevOrder (u8 tevstage, u8 texcoord, u32 texmap, u8 color)
 	//glActiveTexture(GL_TEXTURE0 + g_texmap_start_index + tevstage);
 }
 
-void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel)
+void 	GX_SetTevSwapMode (uint8_t tevstage, uint8_t ras_sel, uint8_t tex_sel)
 {
 	ActiveStage(tevstage);
 
@@ -1167,14 +1159,14 @@ void 	GX_SetTevSwapMode (u8 tevstage, u8 ras_sel, u8 tex_sel)
 	ts.tex_swap = g_tev_swap_tables[tex_sel & 3];
 }
 
-void 	GX_SetTevSwapModeTable (u8 table, u8 r, u8 g, u8 b, u8 a)
+void 	GX_SetTevSwapModeTable (uint8_t table, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
 	g_tev_swap_tables[table & 3] = (r & 3) | ((g & 3) << 2)
 		| ((b & 3) << 4) | ((a & 3) << 6);
 }
 
-void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
-	u8 wrap_s, u8 wrap_t, u8 addprev, u8 utclod, u8 a)
+void 	GX_SetTevIndirect (uint8_t tevstage, uint8_t indtexid, uint8_t format, uint8_t bias, uint8_t mtxid,
+	uint8_t wrap_s, uint8_t wrap_t, uint8_t addprev, uint8_t utclod, uint8_t a)
 {
 	ActiveStage(tevstage);
 
@@ -1191,7 +1183,7 @@ void 	GX_SetTevIndirect (u8 tevstage, u8 indtexid, u8 format, u8 bias, u8 mtxid,
 	(void)utclod;
 }
 
-void 	GX_SetIndTexOrder (u8 ind_stage, u8 tex_coord, u8 tex_map)
+void 	GX_SetIndTexOrder (uint8_t ind_stage, uint8_t tex_coord, uint8_t tex_map)
 {
 	if (ind_stage < 4)
 	{
@@ -1200,7 +1192,7 @@ void 	GX_SetIndTexOrder (u8 ind_stage, u8 tex_coord, u8 tex_map)
 	}
 }
 
-void 	GX_SetIndTexCoordScale (u8 ind_stage, u8 scale_s, u8 scale_t)
+void 	GX_SetIndTexCoordScale (uint8_t ind_stage, uint8_t scale_s, uint8_t scale_t)
 {
 	if (ind_stage < 4)
 	{
@@ -1209,7 +1201,7 @@ void 	GX_SetIndTexCoordScale (u8 ind_stage, u8 scale_s, u8 scale_t)
 	}
 }
 
-void GX_SetIndTexMatrix(u8 mtx_ind, Mtx23 offset_mtx, s8 scale_exp)
+void GX_SetIndTexMatrix(uint8_t mtx_ind, Mtx23 offset_mtx, int8_t scale_exp)
 {
     if (mtx_ind >= GX_ITM_0 && mtx_ind <= GX_ITM_2)
     {
@@ -1223,24 +1215,24 @@ void GX_SetIndTexMatrix(u8 mtx_ind, Mtx23 offset_mtx, s8 scale_exp)
     }
 }
 
-void 	GX_SetNumIndStages (u8 num_stages)
+void 	GX_SetNumIndStages (uint8_t num_stages)
 {
 	g_num_ind_stages = num_stages;
 }
 
-void 	GX_SetTevColorS10 (u8 tev_regid, GXColorS10 color)
+void 	GX_SetTevColorS10 (uint8_t tev_regid, GXColorS10 color)
 {
 	for (unsigned int i = 0; i != 4; ++i)
 		g_color_registers[tev_regid - 1][i] = (float)(&color.r)[i] / 255;
 }
 
-void 	GX_SetTevKColor (u8 tev_regid, GXColor color)
+void 	GX_SetTevKColor (uint8_t tev_regid, GXColor color)
 {
 	for (unsigned int i = 0; i != 4; ++i)
 		g_kcolor_registers[tev_regid][i] = (float)(&color.r)[i] / 255;
 }
 
-void 	GX_SetTevKAlphaSel (u8 tevstage, u8 sel)
+void 	GX_SetTevKAlphaSel (uint8_t tevstage, uint8_t sel)
 {
 	ActiveStage(tevstage);
 
@@ -1248,7 +1240,7 @@ void 	GX_SetTevKAlphaSel (u8 tevstage, u8 sel)
 	ts.kalpha_sel = sel & 0x1f;
 }
 
-void 	GX_SetTevKColorSel (u8 tevstage, u8 sel)
+void 	GX_SetTevKColorSel (uint8_t tevstage, uint8_t sel)
 {
 	ActiveStage(tevstage);
 
@@ -1256,7 +1248,7 @@ void 	GX_SetTevKColorSel (u8 tevstage, u8 sel)
 	ts.kcolor_sel = sel & 0x1f;
 }
 
-void 	GX_SetTevAlphaIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
+void 	GX_SetTevAlphaIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 {
 	ActiveStage(tevstage);
 
@@ -1267,7 +1259,7 @@ void 	GX_SetTevAlphaIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
 	ts.alpha_d = d & 0x7;
 }
 
-void 	GX_SetTevAlphaOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp, u8 tevregid)
+void 	GX_SetTevAlphaOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_t tevscale, uint8_t clamp, uint8_t tevregid)
 {
 	ActiveStage(tevstage);
 
@@ -1279,7 +1271,7 @@ void 	GX_SetTevAlphaOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp
 	ts.alpha_clamp = clamp;
 }
 
-void 	GX_SetTevColorIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
+void 	GX_SetTevColorIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 {
 	ActiveStage(tevstage);
 
@@ -1290,7 +1282,7 @@ void 	GX_SetTevColorIn (u8 tevstage, u8 a, u8 b, u8 c, u8 d)
 	ts.color_d = d & 0xf;
 }
 
-void 	GX_SetTevColorOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp, u8 tevregid)
+void 	GX_SetTevColorOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_t tevscale, uint8_t clamp, uint8_t tevregid)
 {
 	ActiveStage(tevstage);
 
@@ -1302,7 +1294,7 @@ void 	GX_SetTevColorOp (u8 tevstage, u8 tevop, u8 tevbias, u8 tevscale, u8 clamp
 	ts.color_clamp = clamp;
 }
 
-void 	GX_SetTexCoordGen (u8 texcoord, u8 tgen_typ, u8 tgen_src, u8 mtxsrc)
+void 	GX_SetTexCoordGen (uint8_t texcoord, uint8_t tgen_typ, uint8_t tgen_src, uint8_t mtxsrc)
 {
 	if (texcoord >= g_active_texgens.size())
 		g_active_texgens.resize(texcoord + 1);
@@ -1313,12 +1305,12 @@ void 	GX_SetTexCoordGen (u8 texcoord, u8 tgen_typ, u8 tgen_src, u8 mtxsrc)
 	tg.mtxsrc = mtxsrc;
 }
 
-void 	GX_SetNumTexGens (u8 num)
+void 	GX_SetNumTexGens (uint8_t num)
 {
 	g_active_texgens.resize(num);
 }
 
-void 	GX_SetNumTevStages (u8 num)
+void 	GX_SetNumTevStages (uint8_t num)
 {
 	g_active_stages.resize(num);
 
