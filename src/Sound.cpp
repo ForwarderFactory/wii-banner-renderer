@@ -27,9 +27,6 @@ distribution.
 #include <cstring>
 #include <fstream>
 
-// from dolphin
-#include "CommonTypes.h"
-
 #include "../include/libwb/Sound.h"
 
 #include "logger_holder.hpp"
@@ -40,7 +37,7 @@ distribution.
 namespace wb
 {
 
-enum BinaryMagic : u32
+enum BinaryMagic : uint32_t
 {
 	BINARY_MAGIC_WAV = MAKE_FOURCC('R', 'I', 'F', 'F'),
 	BINARY_MAGIC_AIFF = MAKE_FOURCC('F', 'O', 'R', 'M'),
@@ -63,44 +60,44 @@ struct BNS
 	struct BNSHeader
 	{
 		FourCC magic;
-		u32 endian{};
-		u32 size{};
-		u32 unk{};
-		u32 info_off{};
-		u32 info_len{};
-		u32 data_off{};
-		u32 data_len{};
+		uint32_t endian{};
+		uint32_t size{};
+		uint32_t unk{};
+		uint32_t info_off{};
+		uint32_t info_len{};
+		uint32_t data_off{};
+		uint32_t data_len{};
 	};
 
 	struct BNSInfo
 	{
 		FourCC magic;
-		u32 size{};
-		u8 codec{};
-		u8 loop{};
-		u8 channel_count{};
-		u8 unk{};
-		u16 sample_rate{};
-		u16 unk2{};
-		u32 loop_start{}; // do we care?
-		u32 sample_count{};
+		uint32_t size{};
+		uint8_t codec{};
+		uint8_t loop{};
+		uint8_t channel_count{};
+		uint8_t unk{};
+		uint16_t sample_rate{};
+		uint16_t unk2{};
+		uint32_t loop_start{}; // do we care?
+		uint32_t sample_count{};
 		// TODO SO MANY unknowns
-		u32 right_start{};
-		s16 coefs[2][16]{};
+		uint32_t right_start{};
+		int16_t coefs[2][16]{};
 	};
 
 	struct BNSData
 	{
 		FourCC magic;
-		u32 size{};
+		uint32_t size{};
 	};
 
 	struct DSPRegs
 	{
-		s16 coefs[16];
-		u8 pred_scale;
-		s16 yn1;
-		s16 yn2;
+		int16_t coefs[16];
+		uint8_t pred_scale;
+		int16_t yn1;
+		int16_t yn2;
 
 		void ClearHistory() { yn1 = yn2 = 0; }
 	};
@@ -109,7 +106,7 @@ struct BNS
 	BNSHeader hdr;
 	BNSInfo info;
 	BNSData data;
-	u8 *adpcm;
+	uint8_t *adpcm;
 	DSPRegs dsp_regs{};
 
 	BNS() : adpcm(nullptr) {}
@@ -127,7 +124,7 @@ struct BNS
 			>> info.channel_count >> info.unk >> info.sample_rate
 			>> info.unk2 >> info.loop_start >> info.sample_count;
 
-		in.seekg(6 * sizeof(u32), std::istream::cur);
+		in.seekg(6 * sizeof(uint32_t), std::istream::cur);
 
 		if (info.channel_count == 1)
 		{
@@ -136,11 +133,11 @@ struct BNS
 		else if (info.channel_count == 2)
 		{
 			// L, R
-			in.seekg(1 * sizeof(u32), std::istream::cur);
+			in.seekg(1 * sizeof(uint32_t), std::istream::cur);
 			in >> BE >> info.right_start;
-			in.seekg(2 * sizeof(u32), std::istream::cur);
+			in.seekg(2 * sizeof(uint32_t), std::istream::cur);
 			ReadBEArray(in, info.coefs[0], 16);
-			in.seekg(4 * sizeof(u32), std::istream::cur);
+			in.seekg(4 * sizeof(uint32_t), std::istream::cur);
 			ReadBEArray(in, info.coefs[1], 16);
 		}
 		else
@@ -152,7 +149,7 @@ struct BNS
 		in >> data.magic >> BE >> data.size;
 		// chop off the magic + size words
 		hdr.data_len = data.size -= 8;
-		adpcm = new u8[data.size];
+		adpcm = new uint8_t[data.size];
 		ReadBEArray(in, adpcm, data.size);
 
 		if ((hdr.info_len != info.size)
@@ -162,21 +159,21 @@ struct BNS
 			logger << "sound.bin appears invalid\n";
 	}
 
-	[[nodiscard]] u8  GetChannelsCount() const { return info.channel_count; }
-	[[nodiscard]] u32 GetSamplesCount() const { return info.sample_count; }
-	[[nodiscard]] u16 GetSampleRate() const { return info.sample_rate; }
-	[[nodiscard]] u8 GetLoop() const {
+	[[nodiscard]] uint8_t  GetChannelsCount() const { return info.channel_count; }
+	[[nodiscard]] uint32_t GetSamplesCount() const { return info.sample_count; }
+	[[nodiscard]] uint16_t GetSampleRate() const { return info.sample_rate; }
+	[[nodiscard]] uint8_t GetLoop() const {
 		return info.loop;
 	}
-	[[nodiscard]] u32 GetLoopStart() const {
+	[[nodiscard]] uint32_t GetLoopStart() const {
 		return info.loop_start;
 	}
 
-	u32 DecodeChannelToPCM(s16 *pcm, u32 pcm_start_pos,
-		u32 adpcm_start_pos, u32 adpcm_end_pos)
+	uint32_t DecodeChannelToPCM(int16_t *pcm, uint32_t pcm_start_pos,
+		uint32_t adpcm_start_pos, uint32_t adpcm_end_pos)
 	{
-		u32 pcm_pos = pcm_start_pos;
-		u32 adpcm_pos = adpcm_start_pos;
+		uint32_t pcm_pos = pcm_start_pos;
+		uint32_t adpcm_pos = adpcm_start_pos;
 
 		while (adpcm_pos != adpcm_end_pos)
 		{
@@ -189,14 +186,14 @@ struct BNS
 			int scale = 1 << (dsp_regs.pred_scale & 0xf);
 			int coef_idx = (dsp_regs.pred_scale >> 4) & 7;
 
-			s32 coef1 = dsp_regs.coefs[coef_idx * 2];
-			s32 coef2 = dsp_regs.coefs[coef_idx * 2 + 1];
+			int32_t coef1 = dsp_regs.coefs[coef_idx * 2];
+			int32_t coef2 = dsp_regs.coefs[coef_idx * 2 + 1];
 
 			for (int i = 0; i < 14; i++, adpcm_pos++)
 			{
 
 				// unpack a nybble
-				s16 nybble = (adpcm_pos & 1) ?
+				int16_t nybble = (adpcm_pos & 1) ?
 					adpcm[adpcm_pos / 2] & 0xf : adpcm[adpcm_pos / 2] >> 4;
 
 				// sign extension
@@ -232,10 +229,10 @@ struct BNS
 
 		return pcm_pos;
 	}
-static u32 DecodeSampleCountForChannel(u32 adpcm_start_pos, u32 adpcm_end_pos)
+static uint32_t DecodeSampleCountForChannel(uint32_t adpcm_start_pos, uint32_t adpcm_end_pos)
 {
-    u32 count = 0;
-    u32 adpcm_pos = adpcm_start_pos;
+    uint32_t count = 0;
+    uint32_t adpcm_pos = adpcm_start_pos;
 
     while (adpcm_pos != adpcm_end_pos * 2)
     {
@@ -253,24 +250,24 @@ static u32 DecodeSampleCountForChannel(u32 adpcm_start_pos, u32 adpcm_end_pos)
     return count;
 }
 
-[[nodiscard]] u32 GetDecodedSampleCount() const
+[[nodiscard]] uint32_t GetDecodedSampleCount() const
 {
     if (info.channel_count == 1)
     {
         return DecodeSampleCountForChannel(0, data.size);
     }
 
-    u32 left = DecodeSampleCountForChannel(0, info.right_start);
+    uint32_t left = DecodeSampleCountForChannel(0, info.right_start);
 
     return left * 2;
 }
 
-u32 DecodeToPCM(s16* pcm)
+uint32_t DecodeToPCM(int16_t* pcm)
 {
     dsp_regs.ClearHistory();
     memcpy(dsp_regs.coefs, info.coefs[0], 16 * 2);
 
-    u32 end = DecodeChannelToPCM(
+    uint32_t end = DecodeChannelToPCM(
         pcm,
         0,
         0,
@@ -386,7 +383,7 @@ u32 DecodeToPCM(s16* pcm)
 bool Sound::Load(std::istream& file)
 {
     FourCC magic;
-    u32 file_len = 0;
+    uint32_t file_len = 0;
 
     LZ77Decompressor decomp(file);
     std::istream& in = decomp.GetStream();
@@ -463,7 +460,7 @@ bool Sound::Load(std::istream& file)
 	    samples.resize(sampleCount * channels);
 
 	    logger << "Decoding PCM...\n";
-	    u32 written = bns_file.DecodeToPCM(samples.data());
+	    uint32_t written = bns_file.DecodeToPCM(samples.data());
 
 	    logger << "Allocated samples: " << samples.size() << "\n";
 	    logger << "Written samples: " << written << "\n";
@@ -501,10 +498,18 @@ bool Sound::HasLoop() const {
 }
 
 uint32_t Sound::GetLoopStart() const {
+	if (loop_start > GetLoopEnd()) {
+		constexpr uint32_t we_are_fucked = 0;
+		return we_are_fucked;
+	}
+
 	return loop_start;
 }
 
 uint32_t Sound::GetLoopEnd() const {
+	if (!loop_end) { // this can happen sometimes, idk why
+		return sampleCount; // but this seems to sort such bullshit out
+	}
 	return loop_end;
 }
 

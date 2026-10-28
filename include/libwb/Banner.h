@@ -59,7 +59,7 @@ public:
 	void UnloadIcon() { delete layout_icon; layout_icon = nullptr; }
 	void UnloadSound() { delete sound; sound = nullptr; }
 
-	Logger& GetLogger();
+	static Logger& GetLogger();
 
 private:
 	Layout* LoadLayout(const std::string& lyt_name, std::streamoff offset, Vec2f size);

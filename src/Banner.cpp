@@ -32,8 +32,6 @@ distribution.
 #define WIN32_LEAN_AND_MEAN
 #define _WINUSER_
 // from dolphin
-#include "FileHandlerARC.h"
-
 #include "../include/libwb/Banner.h"
 #include "../include/libwb/LZ77.h"
 #include "../include/libwb/Sound.h"
@@ -46,7 +44,7 @@ distribution.
 namespace wb
 {
 
-enum BinaryMagic : u32
+enum BinaryMagic : uint32_t
 {
 	BINARY_MAGIC_U8_ARCHIVE = MAKE_FOURCC('U', 0xAA, '8', '-'),
 
@@ -81,42 +79,61 @@ bool Banner::is_valid(const std::string& filename) {
 }
 
 Banner::Banner(const std::string& _filename, const std::string& _font_archive)
-	: layout_banner(nullptr)
-	, layout_icon(nullptr)
-	, filename(_filename)
-	, font_archive(_font_archive)
+      : layout_banner(nullptr)
+      , layout_icon(nullptr)
+      , filename(_filename)
+      , font_archive(_font_archive)
 {
-	std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
+   std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
 
-	// opening.bnr  archives have 0x600 byte headers
-	// 00000000.app archives have 0x640 byte headers
-	header_bytes = 0x600;
+   header_bytes = 0x600;
 
-	bnr_file.seekg(header_bytes, std::ios::cur);
+   bnr_file.seekg(header_bytes, std::ios::cur);
 
-	// lets see if this is an opening.bnr
-	FourCC magic;
-	bnr_file >> magic;
-	if (magic != BINARY_MAGIC_U8_ARCHIVE)
-	{
-		// lets see if it's a 00000000.app
-		bnr_file.seekg(60, std::ios::cur);
-		bnr_file >> magic;
+   FourCC magic;
+   bnr_file >> magic;
+   if (magic != BINARY_MAGIC_U8_ARCHIVE)
+   {
+      // lets see if it's a 00000000.app
+      bnr_file.seekg(60, std::ios::cur);
+      bnr_file >> magic;
 
-		if (magic != BINARY_MAGIC_U8_ARCHIVE)
-			return;	// not a 00000000.app either
+      if (magic != BINARY_MAGIC_U8_ARCHIVE)
+         return;	// not a 00000000.app either
 
-		header_bytes = 0x640;
-	}
+      header_bytes = 0x640;
+   }
 
-	header_bytes += 32;	// the inner-files have bigger headers
+   const std::streamoff archive_start = header_bytes;
 
-	bnr_file.seekg(-4, std::ios::cur);
-	DiscIO::CARCFile opening_arc(bnr_file);
+   header_bytes += 32;
 
-	offset_banner = opening_arc.GetFileOffset("meta/" "banner" ".bin");
-	offset_icon = opening_arc.GetFileOffset("meta/" "icon" ".bin");
-	offset_sound = opening_arc.GetFileOffset("meta/" "sound" ".bin");
+   bnr_file.clear();
+   bnr_file.seekg(0, std::ios::end);
+   const std::streamoff file_end = bnr_file.tellg();
+
+   std::vector<uint8_t> archive_bytes;
+   if (file_end > archive_start)
+   {
+      archive_bytes.resize(static_cast<size_t>(file_end - archive_start));
+      bnr_file.seekg(archive_start, std::ios::beg);
+      bnr_file.read(reinterpret_cast<char*>(archive_bytes.data()),
+         static_cast<std::streamsize>(archive_bytes.size()));
+      archive_bytes.resize(static_cast<size_t>(bnr_file.gcount()));
+   }
+
+   u8archive::Archive opening_arc;
+
+   if (opening_arc.SetData(archive_bytes))
+   {
+      offset_banner = opening_arc.GetFileOffset("meta/" "banner" ".bin");
+      offset_icon = opening_arc.GetFileOffset("meta/" "icon" ".bin");
+      offset_sound = opening_arc.GetFileOffset("meta/" "sound" ".bin");
+   }
+   else
+   {
+      offset_banner = offset_icon = offset_sound = 0;
+   }
 }
 
 void Banner::LoadBanner()
