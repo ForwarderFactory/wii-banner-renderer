@@ -27,7 +27,6 @@ distribution.
 #include <windows.h>
 #endif
 #include <GL/glew.h>
-//#include <GL/glu.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,13 +36,15 @@ distribution.
 #include <set>
 #include <string>
 #include <vector>
+#include <cstdlib>
 #include <sstream>
 
 #include "../include/libwb/WrapGx.h"
 
 #include "logger_holder.hpp"
+#include "../include/libwb/GXTexture.h"
+
 #include "../include/libwb/Funcs.h"
-#include "libwb/GXTexture.h"
 
 static uint8_t g_texture_decode_buffer[1024 * 1024 * 4];
 
@@ -75,8 +76,12 @@ static IndTexCoordScale g_ind_tex_coord_scale[4];
 static IndTexMtx g_ind_tex_mtx[12];
 static uint8_t g_num_ind_stages = 0;
 
+static float g_texmap_dims[8][2];
+
 // TODO: make this 0, currently causes issues though, figure that out :p
-static constexpr GLuint g_texmap_start_index = 1;
+static constexpr GLuint g_texmap_start_index = 0;
+// idk what these issues are im just gonna make this 0 (was 1)
+// if we have some random weird issues that make no fucking sense try setting this to 1 :)
 
 //static GLuint g_clip_texture;
 
@@ -212,7 +217,7 @@ struct GLTexObj
 
 			default:
 				// not a texture we can decode: make it fully transparent
-				std::cout << "Error decoding texture!!! (format " << int(fmt) << ")\n";
+				wb::logger << "Error decoding texture!!! (format " << int(fmt) << ")\n";
 				std::memset(g_texture_decode_buffer, 0,
 					std::min<size_t>(sizeof(g_texture_decode_buffer), size_t(level_width) * level_height * 4));
 				break;
@@ -244,14 +249,16 @@ struct GLTexObj
 
 std::set<GLTexObj> g_texture_cache;
 
-uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t mipmap, uint8_t maxlod) {
+uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t mipmap, uint8_t maxlod)
+{
 	const uint32_t num_levels = mipmap ? (uint32_t(maxlod) + 1) : 1;
 
 	uint32_t total = 0;
 	uint32_t level_w = wd;
 	uint32_t level_h = ht;
 
-	for (uint32_t level = 0; level < num_levels; ++level) {
+	for (uint32_t level = 0; level < num_levels; ++level)
+	{
 		total += wb::GxTextureSize(
 			wb::RoundUp(level_w, wb::GxBlockWidth(fmt)),
 			wb::RoundUp(level_h, wb::GxBlockHeight(fmt)), fmt);
@@ -591,6 +598,7 @@ void CompiledTevStages::Enable()
 	}
 	glUniform3fv(glGetUniformLocation(program, "ind_mtx_r0"), 12, row0);
 	glUniform3fv(glGetUniformLocation(program, "ind_mtx_r1"), 12, row1);
+	glUniform2fv(glGetUniformLocation(program, "tex_dims"), 8, &g_texmap_dims[0][0]);
 }
 
 static std::string GlslFloat(float v)
@@ -640,7 +648,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
-			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unsupported tgen_src " << (int)tg.tgen_src
+			wb::logger << "GX_SetTexCoordGen: unsupported tgen_src " << (int)tg.tgen_src
 				<< " on texcoord " << i << ", falling back to gl_MultiTexCoord" << i << "\n";
 			src_vec = "vec4(gl_MultiTexCoord" + std::to_string(i) + ".st, 0.0, 1.0)";
 		}
@@ -658,13 +666,13 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 		}
 		else
 		{
-			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unrecognized mtxsrc " << (int)tg.mtxsrc
+			wb::logger << "GX_SetTexCoordGen: unrecognized mtxsrc " << (int)tg.mtxsrc
 				<< " on texcoord " << i << ", using identity\n";
 			mtx_expr = "mat4(1.0)";
 		}
 
 		if (tg.tgen_typ != GX_TG_MTX2x4 && tg.tgen_typ != GX_TG_MTX3x4)
-			wb::logger << wb::LogType::Warning << "GX_SetTexCoordGen: unsupported tgen_typ " << (int)tg.tgen_typ
+			wb::logger << "GX_SetTexCoordGen: unsupported tgen_typ " << (int)tg.tgen_typ
 				<< " on texcoord " << i << ", treating as GX_TG_MTX2x4\n";
 
 		vert_ss << "gl_TexCoord[" << i << "] = " << mtx_expr << " * " << src_vec << ";";
@@ -698,6 +706,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	frag_ss << "uniform vec4 kcolors[4]" ";";
 	frag_ss << "uniform vec3 ind_mtx_r0[12]" ";";
 	frag_ss << "uniform vec3 ind_mtx_r1[12]" ";";
+	frag_ss << "uniform vec2 tex_dims[8];";
 
 	frag_ss << "void main(){";
 
@@ -758,44 +767,51 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 		if (stage.ind_mtxid != GX_ITM_OFF && !stage_has_ind)
 		{
-			wb::logger << wb::LogType::Warning << "Material: unsupported indirect matrix id " << (int)stage.ind_mtxid
+			wb::logger << "Material: unsupported indirect matrix id " << (int)stage.ind_mtxid
 				<< " (or indirect stage " << (int)stage.ind_texid << " not configured)"
 				<< ", disabling indirect for this stage\n";
 		}
 
-		if (stage_has_ind)
-		{
+		if (stage_has_ind) {
 			const IndStageProps& ind = ind_stages[stage.ind_texid];
 			const unsigned int mtx_index = stage.ind_mtxid - GX_ITM_0;
 
 			frag_ss << '{';
 
-			frag_ss << "vec3 ind_tex = vec3(0.0);";
-			if (ind.tex_map < sampler_count && ind.tex_coord < sampler_count)
-			{
-				static const float scale_divisors[] = { 1, 2, 4, 8, 16, 32, 64, 128, 256 };
-				const float div_s = scale_divisors[ind.scale_s < 9 ? ind.scale_s : 0];
-				const float div_t = scale_divisors[ind.scale_t < 9 ? ind.scale_t : 0];
+			static const float scale_divisors[] = { 1, 2, 4, 8, 16, 32, 64, 128, 256 };
+			const float div_s = scale_divisors[ind.scale_s < 9 ? ind.scale_s : 0];
+			const float div_t = scale_divisors[ind.scale_t < 9 ? ind.scale_t : 0];
 
-				frag_ss << "ind_tex = texture2D(textures" << (int)ind.tex_map
+			frag_ss << "vec4 ind_texel = vec4(0.0);";
+
+			if (ind.tex_map < sampler_count && ind.tex_coord < sampler_count) {
+				frag_ss << "ind_texel = texture2D(textures" << (int)ind.tex_map
 					<< ", gl_TexCoord[" << (int)ind.tex_coord << "].xy / vec2("
-					<< GlslFloat(div_s) << ',' << GlslFloat(div_t) << ")).rgb;";
+					<< GlslFloat(div_s) << ',' << GlslFloat(div_t) << "));";
 			}
 
+			frag_ss << "vec3 ind_tex = ind_texel.abg;";
+
 			static const float format_bases[] = { 256.0f, 32.0f, 16.0f, 8.0f };
-			const float base = format_bases[stage.ind_format];
-			const float bias_amount = base * 0.5f;
+			static const float bias_amounts[] = { -128.0f, 1.0f, 1.0f, 1.0f };
 
-			frag_ss << "vec3 ind_raw = mod(ind_tex * 255.0, " << GlslFloat(base) << ");";
+			const float base = format_bases[stage.ind_format & 3];
+			const float bias_amount = bias_amounts[stage.ind_format & 3];
 
-			if (stage.ind_bias & 1) frag_ss << "ind_raw.r -= " << GlslFloat(bias_amount) << ";";
-			if (stage.ind_bias & 2) frag_ss << "ind_raw.g -= " << GlslFloat(bias_amount) << ";";
-			if (stage.ind_bias & 4) frag_ss << "ind_raw.b -= " << GlslFloat(bias_amount) << ";";
+			frag_ss << "vec3 ind_raw = floor(mod(ind_tex * 255.0 + 0.5, " << GlslFloat(base) << "));";
+
+			if (stage.ind_bias & 1) frag_ss << "ind_raw.x += " << GlslFloat(bias_amount) << ";";
+			if (stage.ind_bias & 2) frag_ss << "ind_raw.y += " << GlslFloat(bias_amount) << ";";
+			if (stage.ind_bias & 4) frag_ss << "ind_raw.z += " << GlslFloat(bias_amount) << ";";
 
 			frag_ss << "vec2 stage_ind_offset = vec2("
-				"dot(ind_mtx_r0[" << mtx_index << "], vec3(ind_raw.rg, 1.0)),"
-				"dot(ind_mtx_r1[" << mtx_index << "], vec3(ind_raw.rg, 1.0)))"
-				" / 255.0;";
+				"dot(ind_mtx_r0[" << mtx_index << "], ind_raw),"
+				"dot(ind_mtx_r1[" << mtx_index << "], ind_raw))";
+
+			if (stage.texmap < 8)
+				frag_ss << " / max(tex_dims[" << (int)stage.texmap << "], vec2(1.0))";
+
+			frag_ss << ";";
 
 			if (stage.ind_addprev)
 				frag_ss << "stage_ind_offset += ind_offset;";
@@ -804,13 +820,14 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 			if (stage.ind_wrap_s != GX_ITW_OFF || stage.ind_wrap_t != GX_ITW_OFF)
 			{
-				wb::logger << wb::LogType::Warning << "Material: indirect wrap modes (" << (int)stage.ind_wrap_s
+				wb::logger << "Material: indirect wrap modes (" << (int)stage.ind_wrap_s
 					<< ", " << (int)stage.ind_wrap_t << ") aren't emulated, ignoring\n";
 			}
 
 			if (stage.ind_alpha != GX_ITBA_OFF)
 			{
-				static const char* const bump_components[] = { "", "r", "g", "b" };
+				// bump alpha comes from one of the S, T and U components
+				static const char* const bump_components[] = { "", "x", "y", "z" };
 				frag_ss << "color_raster.a = ind_tex." << bump_components[stage.ind_alpha] << ";";
 			}
 
@@ -982,7 +999,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 			default:
 				frag_ss << "result" << swiz << " = d" << swiz;
-				wb::logger << wb::LogType::Warning << "Unsupported tevop!! " << (int)tevop << '\n';
+				wb::logger << "Unsupported tevop!! " << (int)tevop << '\n';
 				break;
 			}
 
@@ -1006,7 +1023,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	frag_ss << '}';
 
-	//wb::logger << wb::LogType::Warning << frag_ss.str() << '\n';
+	//wb::logger << frag_ss.str() << '\n';
 
 	// create/compile fragment shader
 	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
@@ -1023,7 +1040,6 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	// check compile status of both shaders
 	{
-
 	GLint
 		vert_compiled = false,
 		frag_compiled = false;
@@ -1032,16 +1048,15 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &frag_compiled);
 
 	if (!vert_compiled) {
-		wb::logger << wb::LogType::Warning << "Failed to compile vertex shader\n";
-		wb::logger << wb::LogType::Warning << vert_ss.str() << "\n";
+		wb::logger << "Failed to compile vertex shader\n";
+		wb::logger << vert_ss.str() << "\n";
 	}
 
 	if (!frag_compiled)
 	{
-		wb::logger << wb::LogType::Warning << "Failed to compile fragment shader\n";
-		wb::logger << wb::LogType::Warning << frag_ss.str() << "\n";
+		wb::logger << "Failed to compile fragment shader\n";
+		wb::logger << frag_ss.str() << "\n";
 	}
-
 	}
 
 	// create program, attach shaders
@@ -1055,7 +1070,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	glGetProgramiv(program, GL_LINK_STATUS, &link_status);
 
 	if (!link_status)
-		wb::logger << wb::LogType::Warning << "Failed to link program!\n";
+		wb::logger << "Failed to link program!\n";
 
 	glUseProgram(program);
 
@@ -1071,7 +1086,7 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 	{
 	GLchar infolog[10240] = {};
 	glGetProgramInfoLog(program, 10240, nullptr, infolog);
-	wb::logger << wb::LogType::Warning << infolog;
+	wb::logger << infolog;
 	}
 
 	// pause
@@ -1081,6 +1096,12 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 void 	GX_LoadTexObj (GXTexObj *obj, uint8_t mapid)
 {
 	const GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
+
+	if (mapid < 8)
+	{
+		g_texmap_dims[mapid][0] = static_cast<float>(txobj.wd);
+		g_texmap_dims[mapid][1] = static_cast<float>(txobj.ht);
+	}
 
 	glActiveTexture(GL_TEXTURE0 + g_texmap_start_index + mapid);
 	//glBindTexture(GL_TEXTURE_2D, txobj.tex);
