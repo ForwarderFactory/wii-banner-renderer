@@ -37,7 +37,7 @@ distribution.
 #include "logger_holder.hpp"
 #include "../include/libwb/Layout.h"
 #include "../include/libwb/Endian.h"
-#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/GXDebug.h"
 #include "../include/libwb/Font.h"
 #include "../include/libwb/Material.h"
 
