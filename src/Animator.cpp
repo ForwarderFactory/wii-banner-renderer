@@ -26,7 +26,7 @@ distribution.
 #include <libwb/Funcs.h>
 #include <libwb/Endian.h>
 #include <libwb/Layout.h>
-#include <libwb/GxDebug.h>
+#include <libwb/GXDebug.h>
 
 #include <cmath>
 #include <cstdio>
