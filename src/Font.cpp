@@ -24,7 +24,7 @@ distribution.
 */
 
 #include "../include/libwb/Font.h"
-#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/GXDebug.h"
 
 #include <algorithm>
 #include <array>

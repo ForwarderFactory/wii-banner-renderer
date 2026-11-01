@@ -41,7 +41,7 @@ distribution.
 #endif
 
 #include <libwb/Banner.h>
-#include <libwb/GxDebug.h>
+#include <libwb/GXDebug.h>
 #include <libwb/Layout.h>
 #include <libwb/Wad.h>
 
