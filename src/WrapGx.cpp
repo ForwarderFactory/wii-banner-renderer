@@ -45,7 +45,7 @@ distribution.
 #include "../include/libwb/GXTexture.h"
 
 #include "../include/libwb/Funcs.h"
-#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/GXDebug.h"
 
 namespace gdn = wb::gxdebug::names;
 
