@@ -24,13 +24,13 @@ distribution.
 
 #include <stack>
 
-#include <GL/glew.h>
 
 #include <libwb/Layout.h>
 #include <libwb/Picture.h>
 #include <libwb/Textbox.h>
 #include <libwb/Window.h>
 #include <libwb/Endian.h>
+#include <libwb/GxDebug.h>
 
 #include <cctype>
 #include <cstdio>
@@ -269,28 +269,25 @@ Layout::~Layout()
 }
 
 void Layout::Render(float zoom, uint8_t render_alpha, bool widescreen) const {
-	glPushMatrix();
+	if (gxdebug::Tracing(gxdebug::TRACE_DRAW))
+		gxdebug::Log("[draw] layout %gx%g centered=%d zoom=%g alpha=%u widescreen=%d frame=%g (view scale %g,%g)",
+			static_cast<double>(width), static_cast<double>(height), static_cast<int>(centered), static_cast<double>(zoom),
+			static_cast<unsigned>(render_alpha), widescreen ? 1 : 0, static_cast<double>(frame_current),
+			static_cast<double>(zoom / width), static_cast<double>(-zoom / height));
 
-	glScalef(
-		zoom / width,
-		-zoom / height,
-		1.f
-	);
+	Mtx matrix, step;
+
+	guMtxScale(matrix, zoom / width, -zoom / height, 1.f);
 
 	if (centered) {
-		glTranslatef(
-			width * 0.5f,
-			height * 0.5f,
-			0.f
-		);
+		guMtxTrans(step, width * 0.5f, height * 0.5f, 0.f);
+		guMtxConcat(matrix, step, matrix);
 	}
 
 	for (Pane* pane : panes)
 	{
-		pane->Render(resources, render_alpha, widescreen);
+		pane->Render(resources, render_alpha, widescreen, matrix);
 	}
-
-	glPopMatrix();
 }
 
 void Layout::DebugDumpAll() const

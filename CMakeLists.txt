@@ -11,12 +11,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(WB_BUILD_PLAYER "Build the SDL player" ON)
 option(WB_BUILD_CLI "Build the command-line interface" ON)
+option(WB_BUILD_DEBUGGER "Build the banner debugger (wbd), which needs no display or GL context" ON)
 
 add_library(wb STATIC
         src/GXTexture.cpp
         src/Animator.cpp
         src/Banner.cpp
         src/Endian.cpp
+        src/GxDebug.cpp
         src/Font.cpp
         src/Layout.cpp
         src/Material.cpp
@@ -238,6 +240,16 @@ if (WB_BUILD_PLAYER)
     )
 
     install(TARGETS wbp
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+if (WB_BUILD_DEBUGGER)
+    add_executable(wbd src/debugger/Main.cpp)
+
+    target_link_libraries(wbd PRIVATE wb::wb)
+
+    install(TARGETS wbd
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()

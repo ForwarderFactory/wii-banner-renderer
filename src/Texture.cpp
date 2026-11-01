@@ -26,6 +26,7 @@ distribution.
 
 #include "../include/libwb/Texture.h"
 #include "../include/libwb/Endian.h"
+#include "../include/libwb/GXDebug.h"
 
 namespace wb
 {
@@ -150,6 +151,21 @@ void Texture::Load(std::istream& file)
 
 		file.read(img_ptr, tex_size);
 
+		info.loaded = file.gcount() == static_cast<std::streamsize>(tex_size);
+		info.width = width;
+		info.height = height;
+		info.format = format;
+		info.wrap_s = wrap_s;
+		info.wrap_t = wrap_t;
+		info.min_filter = min_filter;
+		info.mag_filter = mag_filter;
+		info.lod_bias = lod_bias;
+		info.edge_lod = edge_lod;
+		info.min_lod = min_lod;
+		info.max_lod = max_lod;
+		info.data_bytes = tex_size;
+		info.has_palette = palette_offset != 0;
+
 		if (palette_offset)
 		{
 			file.seekg(file_start + palette_offset, std::ios::beg);
@@ -218,6 +234,33 @@ void Texture::Load(std::istream& file)
 			);
 		}
 	}
+}
+
+void Texture::DebugDescribe(std::ostream& os, int indent) const
+{
+	using gxdebug::Print;
+	namespace gdn = gxdebug::names;
+
+	if (!info.width && !info.height)
+	{
+		Print(os, "%*s'%s': not loaded (missing from the archive, or not a valid TPL)\n", indent, "", GetName().c_str());
+		return;
+	}
+
+	Print(os, "%*s'%s': %ux%u %s%s, %u bytes, wrap=%s/%s filter=%s/%s", indent, "", GetName().c_str(),
+		static_cast<unsigned>(info.width), static_cast<unsigned>(info.height), gdn::TexFormat(info.format).c_str(),
+		info.loaded ? "" : " (truncated)", static_cast<unsigned>(info.data_bytes),
+		gdn::Wrap(info.wrap_s).c_str(), gdn::Wrap(info.wrap_t).c_str(),
+		gdn::TexFilter(info.min_filter).c_str(), gdn::TexFilter(info.mag_filter).c_str());
+
+	if (info.max_lod)
+		Print(os, " mipmaps (lod %u..%u, bias %g, edge_lod %u)", static_cast<unsigned>(info.min_lod),
+			static_cast<unsigned>(info.max_lod), static_cast<double>(info.lod_bias), static_cast<unsigned>(info.edge_lod));
+
+	if (info.has_palette)
+		Print(os, " palette: %u entries, %s", static_cast<unsigned>(tlut_count), gdn::TlutFormat(tlut_format).c_str());
+
+	Print(os, "\n");
 }
 
 void Texture::Apply(uint8_t& tlutName, uint8_t map_id, uint8_t wrap_s, uint8_t wrap_t) const {

@@ -25,11 +25,18 @@ distribution.
 #ifndef WII_BNR_PANE_H_
 #define WII_BNR_PANE_H_
 
+#include <iosfwd>
+#include <string>
 #include <vector>
 
 #include <libwb/Animator.h>
 #include <libwb/Funcs.h>
 #include <libwb/WrapGx.h>
+
+namespace wb
+{
+	constexpr float WIDESCREEN_SCALE = 0.82f;
+}
 
 namespace wb
 {
@@ -55,18 +62,15 @@ public:
 	void Load(std::istream& file);
 	virtual ~Pane();
 
-	void Render(const Resources& resources, uint8_t parent_alpha, bool widescreen) const;
+	void Render(const Resources& resources, uint8_t parent_alpha, bool widescreen, Mtx parent) const;
 	void SetFrame(FrameNumber frame, uint8_t key_set);
 
 	bool GetVisible() const { return GetBit(flags, FLAG_VISIBLE); }
 	void SetVisible(bool visible) { SetBit(flags, FLAG_VISIBLE, visible); }
 
-	// TODO: these ! are required?
-	// TODO: better name?
 	bool GetInfluencedAlpha() const { return !GetBit(flags, FLAG_INFLUENCED_ALPHA); }
 	void SetInfluencedAlpha(bool influenced) { SetBit(flags, FLAG_INFLUENCED_ALPHA, !influenced); }
 
-	// TODO: better name?
 	bool GetPositionAdjust() const { return !GetBit(flags, FLAG_POSITION_ADJUST); }
 	void SetPositionAdjust(bool adjust) { SetBit(flags, FLAG_POSITION_ADJUST, !adjust); }
 
@@ -95,7 +99,11 @@ public:
 	const Vec2f& GetScale() const { return scale; }
 	void SetScale(const Vec2f& _scale) { scale = _scale; }
 
-	Pane* FindPane(const std::string& name);	// recursive
+	Pane* FindPane(const std::string& name);
+
+	virtual const char* TypeName() const { return "Pane"; }
+	virtual void DebugDescribe(std::ostream& os, const Resources& resources, int indent) const;
+	virtual std::string DebugState() const;
 
 	PaneList panes;
 
@@ -104,7 +112,7 @@ protected:
 	void ProcessStepKey(const KeyType& type, StepKeyHandler::KeyData data);
 
 private:
-	virtual void Draw(const Resources&, uint8_t) const {};
+	virtual void Draw(const Resources&, uint8_t, Mtx) const {};
 
 	enum : uint8_t
 	{
@@ -128,6 +136,8 @@ class Bounding : public Pane
 {
 public:
 	static const uint32_t BINARY_MAGIC = MAKE_FOURCC('b', 'n', 'd', '1');
+
+	const char* TypeName() const override { return "Bounding"; }
 };
 
 // used by Picture and Window
@@ -141,12 +151,16 @@ public:
 
 	void DebugPrintTexInfo(const Resources& resources) const;
 
+	const char* TypeName() const override { return "Quad"; }
+	void DebugDescribe(std::ostream& os, const Resources& resources, int indent) const override;
+	std::string DebugState() const override;
+
 protected:
 	Quad() {}
 
 	void ProcessHermiteKey(const KeyType& type, float value);
 
-	void Draw(const Resources& resources, uint8_t render_alpha) const;
+	void Draw(const Resources& resources, uint8_t render_alpha, Mtx mtx) const;
 
 private:
 	struct TexCoords

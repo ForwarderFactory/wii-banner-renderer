@@ -38,8 +38,11 @@ public:
 
 	void Load(std::istream& file);
 
+	const char* TypeName() const override { return "Window"; }
+	void DebugDescribe(std::ostream& os, const Resources& resources, int indent) const override;
+
 private:
-	void Draw(const Resources& resources, uint8_t render_alpha) const;
+	void Draw(const Resources& resources, uint8_t render_alpha, Mtx mtx) const;
 
 	struct
 	{

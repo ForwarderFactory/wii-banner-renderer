@@ -25,6 +25,7 @@ distribution.
 #ifndef WII_BNR_TEXTURE_H_
 #define WII_BNR_TEXTURE_H_
 
+#include <iosfwd>
 #include <vector>
 
 #include <libwb/WrapGx.h>
@@ -44,8 +45,27 @@ public:
 	//void setName(const std::string& _name) { name = _name; }
 	void Apply(uint8_t &tlutName, uint8_t map_id, uint8_t wrap_s, uint8_t wrap_t) const;
 
+	struct Info
+	{
+		bool loaded = false;
+		uint16_t width = 0, height = 0;
+		uint32_t format = 0;
+		uint32_t wrap_s = 0, wrap_t = 0;
+		uint32_t min_filter = 0, mag_filter = 0;
+		float lod_bias = 0.f;
+		uint8_t edge_lod = 0, min_lod = 0, max_lod = 0;
+		uint32_t data_bytes = 0;
+		uint32_t tlut_format = 0;
+		uint16_t tlut_count = 0;
+		bool has_palette = false;
+	};
+
+	const Info& GetInfo() const { return info; }
+	void DebugDescribe(std::ostream& os, int indent) const;
+
 	GXTexObj texobj;
 private:
+	Info info;
 	//std::string name;
 	char* img_ptr;
 	char* tlut_ptr;

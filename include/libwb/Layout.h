@@ -100,6 +100,11 @@ public:
 		std::list<std::string> panes;
 	};
 
+	[[nodiscard]] const PaneList& GetPanes() const { return panes; }
+	[[nodiscard]] const std::map<std::string, Group>& GetGroups() const { return groups; }
+	[[nodiscard]] FrameNumber GetLoopStart() const { return frame_loop_start; }
+	[[nodiscard]] FrameNumber GetLoopEnd() const { return frame_loop_end; }
+
 private:
 	PaneList panes;
 

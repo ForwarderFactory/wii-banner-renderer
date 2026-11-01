@@ -41,8 +41,12 @@ public:
 
 	void Load(std::istream& file);
 
+	const char* TypeName() const override { return "Textbox"; }
+	void DebugDescribe(std::ostream& os, const Resources& resources, int indent) const override;
+	std::string DebugState() const override;
+
 private:
-	void Draw(const Resources& resources, uint8_t render_alpha) const override;
+	void Draw(const Resources& resources, uint8_t render_alpha, Mtx mtx) const override;
 	void ProcessHermiteKey(const KeyType& type, float value) override;
 
 	uint16_t material_index, font_index;

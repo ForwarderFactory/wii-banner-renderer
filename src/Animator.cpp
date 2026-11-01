@@ -26,6 +26,7 @@ distribution.
 #include <libwb/Funcs.h>
 #include <libwb/Endian.h>
 #include <libwb/Layout.h>
+#include <libwb/GxDebug.h>
 
 #include <cmath>
 #include <cstdio>
@@ -365,6 +366,91 @@ void Animator::ProcessStepKey(const KeyType& type, StepKeyHandler::KeyData data)
 	<< " target: " << (int)type.target
 	<< " data:" << (int)data.data1 << " " << (int)data.data2
 	<< '\n';
+}
+
+std::string DescribeKeyTarget(AnimationType type, uint8_t target)
+{
+	static const char* const channel[] = { "R", "G", "B", "A" };
+	static const char* const corner[] = { "top-left", "top-right", "bottom-left", "bottom-right" };
+
+	switch (type)
+	{
+	case ANIMATION_TYPE_PANE:
+	{
+		static const char* const names[] =
+		{
+			"translate X", "translate Y", "translate Z", "rotate X", "rotate Y", "rotate Z",
+			"scale X", "scale Y", "width", "height",
+		};
+		if (target < 10)
+			return std::string("pane ") + names[target];
+		break;
+	}
+	case ANIMATION_TYPE_VERTEX_COLOR:
+		if (target == 0x10)
+			return "pane alpha";
+		if (target < 0x10)
+			return std::string("vertex colour ") + corner[target / 4] + " " + channel[target % 4];
+		break;
+	case ANIMATION_TYPE_MATERIAL_COLOR:
+		if (target < 4)
+			return std::string("material colour ") + channel[target];
+		if (target < 0x10)
+			return "tev register " + std::to_string((target - 4) / 4) + " " + channel[(target - 4) % 4];
+		if (target < 0x20)
+			return "konst colour " + std::to_string((target - 0x10) / 4) + " " + channel[(target - 0x10) % 4];
+		break;
+	case ANIMATION_TYPE_TEXTURE_SRT:
+	case ANIMATION_TYPE_IND_MATERIAL:
+	{
+		static const char* const names[] = { "translate S", "translate T", "rotate", "scale S", "scale T" };
+		if (target < 5)
+			return std::string(type == ANIMATION_TYPE_IND_MATERIAL ? "indirect " : "texture ") + names[target];
+		break;
+	}
+	case ANIMATION_TYPE_VISIBILITY:
+		return "visibility";
+	case ANIMATION_TYPE_TEXTURE_PALETTE:
+		return "texture palette";
+	}
+
+	return "unknown target " + std::to_string(target);
+}
+
+void StepKeyHandler::DebugDescribe(std::ostream& os) const
+{
+	for (const auto& key : keys)
+		gxdebug::Print(os, " %g:%u/%u", static_cast<double>(key.first), static_cast<unsigned>(key.second.data1),
+			static_cast<unsigned>(key.second.data2));
+}
+
+void HermiteKeyHandler::DebugDescribe(std::ostream& os) const
+{
+	for (const auto& key : keys)
+		gxdebug::Print(os, " %g:%g(%g)", static_cast<double>(key.first), static_cast<double>(key.second.value),
+			static_cast<double>(key.second.slope));
+}
+
+void Animator::DebugDescribeKeys(std::ostream& os, int indent) const
+{
+	for (int set = 0; set != 2; ++set)
+	{
+		for (const auto& track : keys[set].hermite_keys)
+		{
+			gxdebug::Print(os, "%*sanim[set %d] %s #%u (hermite):", indent, "", set, DescribeKeyTarget(track.first.type, track.first.target).c_str(),
+				static_cast<unsigned>(track.first.index));
+			track.second.DebugDescribe(os);
+			os << '\n';
+		}
+
+		for (const auto& track : keys[set].step_keys)
+		{
+			gxdebug::Print(os, "%*sanim[set %d] %s #%u (step):", indent, "", set, DescribeKeyTarget(track.first.type, track.first.target).c_str(),
+				static_cast<unsigned>(track.first.index));
+			track.second.DebugDescribe(os);
+			os << '\n';
+		}
+	}
 }
 
 }

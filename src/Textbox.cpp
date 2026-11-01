@@ -24,7 +24,6 @@ misrepresented as being the original software.
 distribution.
 */
 
-#include <GL/glew.h>
 
 #include <algorithm>
 #include <cmath>
@@ -38,6 +37,8 @@ distribution.
 #include "logger_holder.hpp"
 #include "../include/libwb/Layout.h"
 #include "../include/libwb/Endian.h"
+#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/Font.h"
 #include "../include/libwb/Material.h"
 
 namespace wb
@@ -141,14 +142,26 @@ namespace
 
 }
 
-void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
+void Textbox::Draw(const Resources& resources, uint8_t render_alpha, Mtx mtx) const
 {
+	const bool trace = gxdebug::Tracing(gxdebug::TRACE_DRAW);
+
 	if (text.empty() || font_index >= resources.fonts.size())
+	{
+		if (trace)
+			gxdebug::Log("[draw]   text '%s' skipped: %s", GetName().c_str(),
+				text.empty() ? "empty text" : "font index out of range");
 		return;
+	}
 
 	Font* const font = resources.fonts[font_index];
 	if (!font || !font->IsLoaded() || !font->GetWidth() || !font->GetHeight())
+	{
+		if (trace)
+			gxdebug::Log("[draw]   text '%s' skipped: font #%u '%s' is not loaded (nothing will be drawn)", GetName().c_str(),
+				static_cast<unsigned>(font_index), font ? font->GetName().c_str() : "?");
 		return;
+	}
 
 	const Material* material = nullptr;
 	if (material_index < resources.materials.size())
@@ -170,7 +183,11 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 	const std::u16string laid_out = LayoutText(text);
 	if (laid_out.empty())
+	{
+		if (trace)
+			gxdebug::Log("[draw]   text '%s' skipped", GetName().c_str());
 		return;
+	}
 
 	std::vector<float> line_widths(1, 0.f);
 	bool first_character = true;
@@ -225,7 +242,32 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 	uint16_t last_sheet = std::numeric_limits<uint16_t>::max();
 	first_character = true;
 
-	glPushMatrix();
+	if (trace)
+	{
+		std::string widths;
+		for (float w : line_widths)
+			widths += gxdebug::Format(" %g", static_cast<double>(w));
+
+		gxdebug::Log("[draw]   text '%s' \"%s\" font #%u '%s' glyph size=%gx%g (font %ux%u, scale %g,%g) space=%g,%g position=%u alignment=%u\n"
+			"[draw]     frame %gx%g, %zu line(s), line widths:%s, start=(%g,%g)",
+			GetName().c_str(), gxdebug::ToUtf8(laid_out).c_str(), static_cast<unsigned>(font_index), font->GetName().c_str(),
+			static_cast<double>(font_width), static_cast<double>(font_height), static_cast<unsigned>(font->GetWidth()),
+			static_cast<unsigned>(font->GetHeight()), static_cast<double>(scale_x), static_cast<double>(scale_y),
+			static_cast<double>(space_char), static_cast<double>(space_line), static_cast<unsigned>(text_position),
+			static_cast<unsigned>(text_alignment), static_cast<double>(frame_width), static_cast<double>(frame_height),
+			line_widths.size(), widths.c_str(), static_cast<double>(x_position), static_cast<double>(y_position));
+	}
+
+	// glyphs are positioned in the pane's own space
+	GX_LoadPosMtxImm(mtx, GX_PNMTX0);
+
+	GX_ClearVtxDesc();
+	GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+	GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+	GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
+	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
 
 	for (char16_t character : laid_out)
 	{
@@ -251,7 +293,13 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 
 		Font::Glyph glyph;
 		if (!font->GetGlyph(static_cast<uint16_t>(character), glyph))
+		{
+			++gxdebug::GetStats().missing_glyphs;
+			if (trace)
+				gxdebug::Log("[draw]     !! no glyph for U+%04X in font '%s', skipped", static_cast<unsigned>(character),
+					font->GetName().c_str());
 			continue;
+		}
 
 		if (!first_character)
 			x_position += space_char;
@@ -259,7 +307,12 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 		if (glyph.sheet_index != last_sheet)
 		{
 			if (!font->Apply(glyph.sheet_index))
+			{
+				if (trace)
+					gxdebug::Log("[draw]     !! font '%s' has no sheet %u for U+%04X, skipped", font->GetName().c_str(),
+						static_cast<unsigned>(glyph.sheet_index), static_cast<unsigned>(character));
 				continue;
+			}
 			last_sheet = glyph.sheet_index;
 		}
 
@@ -278,29 +331,105 @@ void Textbox::Draw(const Resources& resources, uint8_t render_alpha) const
 			? material->GetChannelColor(colors[0], render_alpha)
 			: GXColor{ colors[0].r, colors[0].g, colors[0].b, MultiplyColors(colors[0].a, render_alpha) };
 
-		glBegin(GL_QUADS);
+		++gxdebug::GetStats().glyphs;
 
-		glColor4ub(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
-		glTexCoord2f(glyph.s1, glyph.t2);
-		glVertex2f(glyph_x, glyph_bottom);
+		if (trace)
+			gxdebug::Log("[draw]     U+%04X '%s' sheet=%u x=%g..%g y=%g..%g uv=(%g,%g)-(%g,%g) top=%s bottom=%s advance=%g",
+				static_cast<unsigned>(character), gxdebug::ToUtf8(std::u16string(1, character)).c_str(),
+				static_cast<unsigned>(glyph.sheet_index), static_cast<double>(glyph_x),
+				static_cast<double>(glyph_x + glyph_width), static_cast<double>(glyph_bottom), static_cast<double>(glyph_top),
+				static_cast<double>(glyph.s1), static_cast<double>(glyph.t1), static_cast<double>(glyph.s2),
+				static_cast<double>(glyph.t2), gxdebug::names::Color(top_color.r, top_color.g, top_color.b, top_color.a).c_str(),
+				gxdebug::names::Color(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a).c_str(),
+				static_cast<double>(glyph.widths.char_width * scale_x));
 
-		glTexCoord2f(glyph.s2, glyph.t2);
-		glVertex2f(glyph_x + glyph_width, glyph_bottom);
+		GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
 
-		glColor4ub(top_color.r, top_color.g, top_color.b, top_color.a);
-		glTexCoord2f(glyph.s2, glyph.t1);
-		glVertex2f(glyph_x + glyph_width, glyph_top);
+		GX_Position2f32(glyph_x, glyph_bottom);
+		GX_Color4u8(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
+		GX_TexCoord2f32(glyph.s1, glyph.t2);
 
-		glTexCoord2f(glyph.s1, glyph.t1);
-		glVertex2f(glyph_x, glyph_top);
+		GX_Position2f32(glyph_x + glyph_width, glyph_bottom);
+		GX_Color4u8(bottom_color.r, bottom_color.g, bottom_color.b, bottom_color.a);
+		GX_TexCoord2f32(glyph.s2, glyph.t2);
 
-		glEnd();
+		GX_Position2f32(glyph_x + glyph_width, glyph_top);
+		GX_Color4u8(top_color.r, top_color.g, top_color.b, top_color.a);
+		GX_TexCoord2f32(glyph.s2, glyph.t1);
+
+		GX_Position2f32(glyph_x, glyph_top);
+		GX_Color4u8(top_color.r, top_color.g, top_color.b, top_color.a);
+		GX_TexCoord2f32(glyph.s1, glyph.t1);
+
+		GX_End();
 
 		x_position += glyph.widths.char_width * scale_x;
 		first_character = false;
 	}
 
-	glPopMatrix();
+}
+
+void Textbox::DebugDescribe(std::ostream& os, const Resources& resources, int indent) const
+{
+	using gxdebug::Print;
+	namespace gdn = gxdebug::names;
+
+	Pane::DebugDescribe(os, resources, indent);
+
+	Print(os, "%*smaterial #%u", indent + 2, "", static_cast<unsigned>(material_index));
+	if (material_index < resources.materials.size())
+		Print(os, " '%s'\n", resources.materials[material_index]->GetName().c_str());
+	else
+		Print(os, " !! OUT OF RANGE (%zu materials): drawn without a material\n", resources.materials.size());
+
+	Print(os, "%*sfont #%u", indent + 2, "", static_cast<unsigned>(font_index));
+	if (font_index < resources.fonts.size())
+		Print(os, " '%s'%s\n", resources.fonts[font_index]->GetName().c_str(),
+			resources.fonts[font_index]->IsLoaded() ? "" : " !! NOT LOADED, nothing will be drawn");
+	else
+		Print(os, " !! OUT OF RANGE (%zu fonts)\n", resources.fonts.size());
+
+	Print(os, "%*sglyph size=%gx%g char spacing=%g line spacing=%g text_position=%u (h=%u,v=%u) text_alignment=%u\n", indent + 2, "",
+		static_cast<double>(font_width), static_cast<double>(font_height), static_cast<double>(space_char),
+		static_cast<double>(space_line), static_cast<unsigned>(text_position), static_cast<unsigned>(text_position % 3),
+		static_cast<unsigned>(text_position / 3), static_cast<unsigned>(text_alignment));
+	Print(os, "%*scolours: top=%s bottom=%s\n", indent + 2, "", gdn::Color(colors[0].r, colors[0].g, colors[0].b, colors[0].a).c_str(),
+		gdn::Color(colors[1].r, colors[1].g, colors[1].b, colors[1].a).c_str());
+
+	Print(os, "%*stext (%zu UTF-16 units): \"", indent + 2, "", text.size());
+	for (char16_t c : text)
+	{
+		if (c == u'\n')
+			os << "\\n";
+		else if (c == u'\t')
+			os << "\\t";
+		else if (c < 0x20)
+			Print(os, "\\u%04X", static_cast<unsigned>(c));
+		else
+			os << gxdebug::ToUtf8(std::u16string(1, c));
+	}
+	Print(os, "\"\n");
+
+	bool has_control = false;
+	for (char16_t c : text)
+		has_control = has_control || (c < 0x20 && c != u'\n' && c != u'\t');
+
+	if (has_control)
+	{
+		Print(os, "%*s!! contains control characters (these are tags, not supported yet), units:", indent + 2, "");
+		for (char16_t c : text)
+			Print(os, " %04X", static_cast<unsigned>(c));
+		Print(os, "\n");
+	}
+}
+
+std::string Textbox::DebugState() const
+{
+	using gxdebug::Format;
+	namespace gdn = gxdebug::names;
+
+	return Pane::DebugState() + Format(" textTop=%s textBottom=%s", gdn::Color(colors[0].r, colors[0].g, colors[0].b, colors[0].a).c_str(),
+		gdn::Color(colors[1].r, colors[1].g, colors[1].b, colors[1].a).c_str());
 }
 
 void Textbox::ProcessHermiteKey(const KeyType& type, float value)

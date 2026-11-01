@@ -26,7 +26,6 @@ distribution.
 #include <cstdlib>
 #include <vector>
 
-#include <GL/glew.h>
 
 // hax
 #define WIN32_LEAN_AND_MEAN
@@ -37,6 +36,7 @@ distribution.
 #include "../include/libwb/Sound.h"
 #include "../include/libwb/Endian.h"
 #include "../include/libwb/Types.h"
+#include "../include/libwb/GXDebug.h"
 #include <libwb/U8.h>
 
 #include "logger_holder.hpp"
@@ -139,7 +139,7 @@ Banner::Banner(const std::string& _filename, const std::string& _font_archive)
 void Banner::LoadBanner()
 {
 	if (offset_banner && !layout_banner)
-		layout_banner = LoadLayout("Banner", offset_banner, Vec2f(608.f, 456.f));
+		layout_banner = LoadLayout("Banner", offset_banner, Vec2f(BANNER_WIDTH, BANNER_HEIGHT));
 }
 
 void Banner::LoadSound()
@@ -343,6 +343,99 @@ Layout* Banner::LoadLayout(const std::string& lyt_name, std::streamoff offset, V
       layout->DebugDumpAll();
 
    return layout;
+}
+
+namespace
+{
+	void ListEntries(std::ostream& os, const u8archive::Archive& arc, int indent)
+	{
+		for (const u8archive::Archive::Entry& entry : arc.Entries())
+		{
+			if (entry.directory)
+				gxdebug::Print(os, "%*s%s/\n", indent, "", entry.path.c_str());
+			else
+				gxdebug::Print(os, "%*s%s  (offset 0x%X, %u bytes)\n", indent, "", entry.path.c_str(),
+					static_cast<unsigned>(entry.offset), static_cast<unsigned>(entry.length));
+		}
+	}
+}
+
+void Banner::DebugDescribeContainer(std::ostream& os) const
+{
+	using gxdebug::Print;
+
+	Print(os, "file: %s\n", filename.c_str());
+	Print(os, "header: 0x%llX bytes before the data (0x600 = opening.bnr, 0x640 = 00000000.app, then +0x20 for the archive header)\n",
+		static_cast<unsigned long long>(header_bytes));
+	Print(os, "meta/banner.bin at 0x%llX, meta/icon.bin at 0x%llX, meta/sound.bin at 0x%llX (0 = missing)\n",
+		static_cast<unsigned long long>(offset_banner), static_cast<unsigned long long>(offset_icon),
+		static_cast<unsigned long long>(offset_sound));
+
+	std::ifstream bnr_file(filename, std::ios::binary | std::ios::in);
+	if (!bnr_file)
+	{
+		Print(os, "!! unable to open the file again\n");
+		return;
+	}
+
+	{
+		bnr_file.seekg(0, std::ios::end);
+		const std::streamoff file_end = bnr_file.tellg();
+		const std::streamoff archive_start = header_bytes - 32;
+
+		std::vector<uint8_t> bytes;
+		if (file_end > archive_start)
+		{
+			bytes.resize(static_cast<size_t>(file_end - archive_start));
+			bnr_file.seekg(archive_start, std::ios::beg);
+			bnr_file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+			bytes.resize(static_cast<size_t>(bnr_file.gcount()));
+		}
+
+		u8archive::Archive outer;
+		if (outer.SetData(bytes))
+		{
+			Print(os, "outer archive: %zu entries\n", outer.Entries().size());
+			ListEntries(os, outer, 2);
+		}
+		else
+		{
+			Print(os, "!! the outer U8 archive could not be parsed\n");
+		}
+	}
+
+	const struct { const char* name; std::streamoff offset; } inner[] =
+	{
+		{ "banner.bin", offset_banner }, { "icon.bin", offset_icon }, { "sound.bin", offset_sound },
+	};
+
+	for (const auto& item : inner)
+	{
+		if (!item.offset)
+			continue;
+
+		bnr_file.clear();
+
+		u8archive::Compression codec = u8archive::COMPRESSION_NONE;
+		u8archive::Archive arc;
+		if (arc.OpenStream(bnr_file, header_bytes + item.offset, 0, &codec))
+		{
+			Print(os, "%s: %s, %zu entries\n", item.name, u8archive::CompressionName(codec), arc.Entries().size());
+			ListEntries(os, arc, 2);
+		}
+		else
+		{
+			bnr_file.clear();
+			char magic[4] = {};
+			bnr_file.seekg(header_bytes + item.offset, std::ios::beg);
+			bnr_file.read(magic, 4);
+			Print(os, "%s: not a U8 archive (starts with %02X %02X %02X %02X \"%c%c%c%c\")\n", item.name,
+				static_cast<unsigned>(static_cast<uint8_t>(magic[0])), static_cast<unsigned>(static_cast<uint8_t>(magic[1])),
+				static_cast<unsigned>(static_cast<uint8_t>(magic[2])), static_cast<unsigned>(static_cast<uint8_t>(magic[3])),
+				magic[0] >= 0x20 && magic[0] < 0x7F ? magic[0] : '.', magic[1] >= 0x20 && magic[1] < 0x7F ? magic[1] : '.',
+				magic[2] >= 0x20 && magic[2] < 0x7F ? magic[2] : '.', magic[3] >= 0x20 && magic[3] < 0x7F ? magic[3] : '.');
+		}
+	}
 }
 
 Banner::~Banner()

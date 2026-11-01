@@ -80,6 +80,50 @@ struct Settings {
 	}
 };
 
+struct Canvas {
+	int width = 0;
+	int height = 0;
+	wb::Rect crop{};
+};
+
+static Canvas compute_canvas(const Settings& settings) {
+	const std::array<wb::Point, 4> reference = settings.icon
+		? std::array<wb::Point, 4>{{ {1060, 0}, {1060, 520}, {1833, 0}, {1833, 520} }}
+		: std::array<wb::Point, 4>{{ {1060, 20}, {1060, 403}, {1813, 20}, {1813, 403} }};
+
+	double width = VIDEO_WIDTH;
+	double height = VIDEO_HEIGHT;
+
+	const double layout_width = settings.icon ? wb::Banner::ICON_WIDTH : wb::Banner::BANNER_WIDTH;
+	const double layout_height = settings.icon ? wb::Banner::ICON_HEIGHT : wb::Banner::BANNER_HEIGHT;
+
+	width = 2.0 * layout_width / wb::WIDESCREEN_SCALE;
+	height = 2.0 * layout_height;
+
+	width *= settings.resolution_multiplier;
+	height *= settings.resolution_multiplier;
+
+	Canvas canvas;
+
+	canvas.width = static_cast<int>(std::lround(width));
+	canvas.height = static_cast<int>(std::lround(height));
+
+	if (settings.no_crop) {
+		canvas.crop = { 0, 0, canvas.width, canvas.height };
+	} else {
+		std::array<wb::Point, 4> points = reference;
+
+		for (auto& point : points) {
+			point.x *= width / VIDEO_WIDTH;
+			point.y *= height / VIDEO_HEIGHT;
+		}
+
+		canvas.crop = GetCrop(points);
+	}
+
+	return canvas;
+}
+
 struct Render {
 	std::filesystem::path input;
 	std::filesystem::path output;
@@ -195,7 +239,8 @@ int process(const Render& input_opening, Settings settings = {}) {
 		return EXIT_SUCCESS;
 	}
 
-	wb::Renderer renderer(static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+	const Canvas canvas = compute_canvas(settings);
+	wb::Renderer renderer(canvas.width, canvas.height);
 
 	wb::Banner banner(opening.string(), settings.font_archive.string());
 
@@ -242,34 +287,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 		);
 	}
 
-	std::array<wb::Point, 4> points = {{
-		{1060 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
-		{1060 * settings.resolution_multiplier, 403 * settings.resolution_multiplier},
-		{1813 * settings.resolution_multiplier, 20 * settings.resolution_multiplier},
-		{1813 * settings.resolution_multiplier, 403 * settings.resolution_multiplier}
-	}};
-
-	std::array<wb::Point, 4> points_icon = {{
-		{1060 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
-		{1060 * settings.resolution_multiplier, 520 * settings.resolution_multiplier},
-		{1833 * settings.resolution_multiplier, 0 * settings.resolution_multiplier},
-		{1833 * settings.resolution_multiplier, 520 * settings.resolution_multiplier}
-	}};
-
-	wb::Rect crop{};
-
-	if (settings.no_crop) {
-		crop = {
-			0,
-			0,
-			static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier),
-			static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier)
-		};
-	}
-	else
-	{
-		crop = GetCrop(settings.icon ? points_icon : points);
-	}
+	const wb::Rect crop = canvas.crop;
 
 	VideoEncoder::OutputFormat output_format = settings.webm ?
 	VideoEncoder::OutputFormat::WEBM :
@@ -288,7 +306,7 @@ int process(const Render& input_opening, Settings settings = {}) {
 			char filename[64];
 			sprintf(filename, "output-%04d.png", i);
 
-			renderer.SavePNG(filename, static_cast<int>(VIDEO_WIDTH * settings.resolution_multiplier), static_cast<int>(VIDEO_HEIGHT * settings.resolution_multiplier));
+			renderer.SavePNG(filename, canvas.width, canvas.height);
   		}
 
     	encoder.writeVideoFrame(renderer.GetFrameData(crop).data());
@@ -343,7 +361,7 @@ int main(int argc, char** argv) {
     	std::cout << "-so/--sound-only:                   Save audio only, don't process banner/icon.\n";
     	std::cout << "-min/--minimum-length <int>:        Minimum length of the output video. Default is 10 seconds, 0 is the length of the audio track.\n";
     	std::cout << "-max/--maximum-length <int>:        Maximum length of the output video. Default is no limit.\n";
-		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier, 1 is default (1920x1080). Example: pass 1.33 for 1440p or 2 for 4k.\n";
+		std::cout << "-res/--resolution-multiplier <int>: Resolution multiplier. 1 is native\n";
 		std::cout << "-font/--font-archive <path>:        Wii shared font archive containing wbf1.brfna and wbf2.brfna.\n";
     	std::cout << "-webm/--webm:                       Output in .webm format (VP9)\n";
     	std::cout << "-log/--log:                         Enable logging for debugging\n";

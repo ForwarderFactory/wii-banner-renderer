@@ -24,6 +24,7 @@ distribution.
 */
 
 #include "../include/libwb/Font.h"
+#include "../include/libwb/GxDebug.h"
 
 #include <algorithm>
 #include <array>
@@ -482,6 +483,41 @@ bool Font::Apply(uint16_t sheet_index) const
 
 	GX_LoadTexObj(&texture_objects[sheet_index], 0);
 	return true;
+}
+
+void Font::DebugDescribe(std::ostream& os, int indent) const
+{
+	using gxdebug::Print;
+	namespace gdn = gxdebug::names;
+
+	Print(os, "%*s'%s': %s\n", indent, "", GetName().c_str(),
+		loaded ? (archived ? "loaded (RFNA, Huffman compressed sheets)" : "loaded (RFNT)") : "NOT LOADED (font missing from the banner and from the font archive)");
+
+	if (!loaded)
+		return;
+
+	Print(os, "%*sfont size %ux%u, line feed %d, alternate glyph %u, default widths left=%d glyph=%u char=%u\n", indent + 2, "",
+		static_cast<unsigned>(width), static_cast<unsigned>(height), static_cast<int>(line_feed),
+		static_cast<unsigned>(alternate_char_index), static_cast<int>(default_width.left),
+		static_cast<unsigned>(default_width.glyph_width), static_cast<unsigned>(default_width.char_width));
+	Print(os, "%*scell %ux%u, %u sheet(s) of %ux%u %s (%u bytes each), %u cell(s) per row, %u row(s)\n", indent + 2, "",
+		static_cast<unsigned>(cell_width), static_cast<unsigned>(cell_height), static_cast<unsigned>(sheet_count),
+		static_cast<unsigned>(sheet_width), static_cast<unsigned>(sheet_height), gdn::TexFormat(sheet_format).c_str(),
+		static_cast<unsigned>(sheet_size), static_cast<unsigned>(sheet_row), static_cast<unsigned>(sheet_line));
+
+	for (size_t i = 0; i != code_maps.size(); ++i)
+	{
+		static const char* const methods[] = { "direct offset", "table", "scan" };
+		const CodeMap& map = code_maps[i];
+
+		Print(os, "%*scode map %zu: U+%04X..U+%04X, method %u (%s)\n", indent + 2, "", i, static_cast<unsigned>(map.ccode_begin),
+			static_cast<unsigned>(map.ccode_end), static_cast<unsigned>(map.mapping_method),
+			map.mapping_method < 3 ? methods[map.mapping_method] : "unknown");
+	}
+
+	for (size_t i = 0; i != width_blocks.size(); ++i)
+		Print(os, "%*swidth block %zu: glyphs %u..%u\n", indent + 2, "", i, static_cast<unsigned>(width_blocks[i].index_begin),
+			static_cast<unsigned>(width_blocks[i].index_end));
 }
 
 }

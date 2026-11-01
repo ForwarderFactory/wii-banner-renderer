@@ -22,7 +22,6 @@ misrepresented as being the original software.
 distribution.
 */
 
-#include <GL/glew.h>
 
 #include <cstdio>
 #include <string>
@@ -35,6 +34,7 @@ distribution.
 #include <libwb/Material.h>
 #include <libwb/Endian.h>
 #include <libwb/Funcs.h>
+#include <libwb/GxDebug.h>
 #include <libwb/Layout.h>
 #include <libwb/Texture.h>
 
@@ -319,6 +319,9 @@ void Material::ApplyTextures(const Resources &resources) const {
 					tr.wrap_s,
 					tr.wrap_t
 				);
+			else if (gxdebug::Tracing(gxdebug::TRACE_GX))
+				gxdebug::Log("[gx] !! material '%s' texture map %u: texture index %u is out of range (%zu texture(s))",
+					GetName().c_str(), i, static_cast<unsigned>(tr.tex_index), resources.textures.size());
 		}
 		else {
 			if (palette_texture[i] == PALETTE_DEFAULT)
@@ -361,6 +364,9 @@ void Material::ApplyTextures(const Resources &resources) const {
 
 void Material::Apply(const Resources& resources) const
 {
+	if (gxdebug::Tracing(gxdebug::TRACE_GX))
+		gxdebug::Log("[gx] --- Material::Apply '%s'", GetName().c_str());
+
 	// alpha compare
 	GX_SetAlphaCompare(alpha_compare.function & 0xf, alpha_compare.ref0,
 		alpha_compare.op, alpha_compare.function >> 4, alpha_compare.ref1);
@@ -391,46 +397,53 @@ void Material::Apply(const Resources& resources) const
 		GX_SetTevKColor(i, color_constants[i]);
 
 	// texture coord gen
-	glMatrixMode(GL_TEXTURE);
 	{
 	unsigned int i = 0;
 	for (auto& tcg : texture_coord_gens)
 	{
-		GX_SetTexCoordGen(GX_TEXCOORD0 + i, tcg.tgen_type, tcg.tgen_src, tcg.mtrx_src);
-
-		glActiveTexture(GL_TEXTURE0 + i);
-		glLoadIdentity();
-
-		if (tcg.tgen_type == GX_TG_MTX2x4 && tcg.mtrx_src != GX_IDENTITY)
+		if (tcg.mtrx_src != GX_IDENTITY)
 		{
-			const uint8_t mtrx = (tcg.mtrx_src - GX_TEXMTX0) / 3;
+			Mtx texture_mtx;
+			guMtxIdentity(texture_mtx);
 
-			if (mtrx < texture_srts.size())
+			if (tcg.tgen_type == GX_TG_MTX2x4)
 			{
-				const auto& srt = texture_srts[mtrx];
+				const uint8_t mtrx = (tcg.mtrx_src - GX_TEXMTX0) / 3;
 
-				glTranslatef(0.5f, 0.5f, 0.f);
-				glRotatef(srt.rotate, 0.f, 0.f, 1.f);
+				if (mtrx < texture_srts.size())
+				{
+					const auto& srt = texture_srts[mtrx];
 
-				glScalef(srt.scale_s, srt.scale_t, 1.f);
+					Mtx step;
 
-				glTranslatef(srt.translate_s / srt.scale_s - 0.5f, srt.translate_t / srt.scale_t -0.5f, 0.f);
+					guMtxTrans(texture_mtx, 0.5f, 0.5f, 0.f);
+
+					guMtxRotDeg(step, 'z', srt.rotate);
+					guMtxConcat(texture_mtx, step, texture_mtx);
+
+					guMtxScale(step, srt.scale_s, srt.scale_t, 1.f);
+					guMtxConcat(texture_mtx, step, texture_mtx);
+
+					guMtxTrans(step, srt.translate_s / srt.scale_s - 0.5f, srt.translate_t / srt.scale_t - 0.5f, 0.f);
+					guMtxConcat(texture_mtx, step, texture_mtx);
+				}
+				else if (gxdebug::Tracing(gxdebug::TRACE_GX))
+				{
+					gxdebug::Log("[gx] !! texgen %u uses texture matrix %u but the material only has %zu texture srt(s)",
+						i, static_cast<unsigned>(mtrx), texture_srts.size());
+				}
 			}
+
+			GX_LoadTexMtxImm(texture_mtx, tcg.mtrx_src, GX_MTX2x4);
 		}
+
+		GX_SetTexCoordGen(GX_TEXCOORD0 + i, tcg.tgen_type, tcg.tgen_src, tcg.mtrx_src);
 
 		++i;
 	}
 
 	GX_SetNumTexGens(i);
-
-	// TODO: is this needed?
-	for (; i != 8; ++i)
-	{
-		glActiveTexture(GL_TEXTURE0 + i);
-		glLoadIdentity();
 	}
-	}
-	glMatrixMode(GL_MODELVIEW);
 
 	// bind textures
 	ApplyTextures(resources);
@@ -546,7 +559,7 @@ void Material::Apply(const Resources& resources) const
 	GX_SetNumTevStages(i);
 	}
 
-	glColor4ubv(&color.r);
+	GX_SetChanMatColor(GX_COLOR0A0, color);
 }
 
 void Material::DebugPrintSrts() const
@@ -638,6 +651,189 @@ void Material::ProcessStepKey(const KeyType& type, StepKeyHandler::KeyData data)
 	}
 
 	Base::ProcessStepKey(type, data);
+}
+
+void Material::DebugDescribe(std::ostream& os, const Resources& resources, int indent) const
+{
+	using gxdebug::Print;
+	namespace gdn = gxdebug::names;
+
+	const int in = indent;
+
+	Print(os, "%*smaterial '%s'\n", in, "", GetName().c_str());
+	Print(os, "%*sflags=0x%08X: texture_maps=%u texture_srts=%u texgens=%u tev_stages=%u ind_stages=%u ind_srts=%u\n"
+		"%*s       tev_swap_table=%u alpha_compare=%u blend_mode=%u channel_control=%u material_color=%u\n",
+		in + 2, "", static_cast<unsigned>(flags.value),
+		static_cast<unsigned>(flags.texture_map), static_cast<unsigned>(flags.texture_srt),
+		static_cast<unsigned>(flags.texture_coord_gen), static_cast<unsigned>(flags.tev_stage),
+		static_cast<unsigned>(flags.ind_stage), static_cast<unsigned>(flags.ind_srt),
+		in + 2, "", static_cast<unsigned>(flags.tev_swap_table), static_cast<unsigned>(flags.alpha_compare),
+		static_cast<unsigned>(flags.blend_mode), static_cast<unsigned>(flags.channel_control),
+		static_cast<unsigned>(flags.material_color));
+
+	Print(os, "%*smaterial color %s%s, channel control: colour from %s, alpha from %s%s\n", in + 2, "",
+		gdn::Color(color.r, color.g, color.b, color.a).c_str(), flags.material_color ? "" : " (default)",
+		gdn::ChannelSource(chan_ctrl.color_mat_src).c_str(), gdn::ChannelSource(chan_ctrl.alpha_mat_src).c_str(),
+		flags.channel_control ? "" : " (default)");
+
+	for (unsigned i = 0; i != 3; ++i)
+		Print(os, "%*stev colour register REG%u (s10): (%d,%d,%d,%d)\n", in + 2, "", i,
+			static_cast<int>(color_regs[i].r), static_cast<int>(color_regs[i].g),
+			static_cast<int>(color_regs[i].b), static_cast<int>(color_regs[i].a));
+
+	for (unsigned i = 0; i != 4; ++i)
+		Print(os, "%*skonst colour K%u: %s\n", in + 2, "", i,
+			gdn::Color(color_constants[i].r, color_constants[i].g, color_constants[i].b, color_constants[i].a).c_str());
+
+	for (size_t i = 0; i != texture_maps.size(); ++i)
+	{
+		const TextureMap& map = texture_maps[i];
+
+		std::string texture_name;
+		if (map.tex_index < resources.textures.size())
+			texture_name = "'" + resources.textures[map.tex_index]->GetName() + "'";
+		else
+			texture_name = "!! OUT OF RANGE (" + std::to_string(resources.textures.size()) + " textures)";
+
+		Print(os, "%*stexture map %zu: texture #%u %s wrap=%s/%s", in + 2, "", i,
+			static_cast<unsigned>(map.tex_index), texture_name.c_str(),
+			gdn::Wrap(map.wrap_s).c_str(), gdn::Wrap(map.wrap_t).c_str());
+
+		if (i < MAX_TEX_MAP && palette_texture[i] != PALETTE_DEFAULT)
+			Print(os, " palette override=%u", static_cast<unsigned>(palette_texture[i]));
+
+		Print(os, "\n");
+	}
+
+	for (size_t i = 0; i != texture_srts.size(); ++i)
+	{
+		const TextureSrt& srt = texture_srts[i];
+
+		Print(os, "%*stexture srt %zu: translate=(%g,%g) rotate=%g scale=(%g,%g)\n", in + 2, "", i,
+			static_cast<double>(srt.translate_s), static_cast<double>(srt.translate_t),
+			static_cast<double>(srt.rotate), static_cast<double>(srt.scale_s), static_cast<double>(srt.scale_t));
+	}
+
+	for (size_t i = 0; i != texture_coord_gens.size(); ++i)
+	{
+		const TextureCoordGen& tcg = texture_coord_gens[i];
+
+		Print(os, "%*stexgen %zu: type=%s src=%s mtx=%s\n", in + 2, "", i,
+			gdn::TexGenType(tcg.tgen_type).c_str(), gdn::TexGenSrc(tcg.tgen_src).c_str(),
+			gdn::TexMtx(tcg.mtrx_src).c_str());
+	}
+
+	for (unsigned i = 0; i != 4; ++i)
+		Print(os, "%*stev swap table %u: %s%s\n", in + 2, "", i,
+			gdn::SwapTable(static_cast<uint8_t>(tev_swap_table[i].value)).c_str(),
+			flags.tev_swap_table ? "" : " (default)");
+
+	for (size_t i = 0; i != ind_srts.size(); ++i)
+	{
+		const IndSrt& srt = ind_srts[i];
+
+		Print(os, "%*sindirect srt %zu: translate=(%g,%g) rotate=%g scale=(%g,%g)\n", in + 2, "", i,
+			static_cast<double>(srt.translate_s), static_cast<double>(srt.translate_t),
+			static_cast<double>(srt.rotate), static_cast<double>(srt.scale_s), static_cast<double>(srt.scale_t));
+	}
+
+	for (size_t i = 0; i != ind_stages.size(); ++i)
+	{
+		const IndStage& stage = ind_stages[i];
+
+		Print(os, "%*sindirect stage %zu: coord=%s map=%s scale=%s/%s\n", in + 2, "", i,
+			gdn::TexCoord(stage.tex_coord).c_str(), gdn::TexMap(stage.tex_map).c_str(),
+			gdn::IndScale(stage.scale_s).c_str(), gdn::IndScale(stage.scale_t).c_str());
+	}
+
+	Print(os, "%*stev stages (%zu)%s:\n", in + 2, "", tev_stages.size(),
+		flags.tev_stage ? "" : ", none stored so the defaults for this many texture maps were generated");
+
+	for (size_t i = 0; i != tev_stages.size(); ++i)
+	{
+		const TevStage& ts = tev_stages[i];
+
+		Print(os, "%*s[%zu] coord=%s map=%s chan=%s swap(ras=table%u tex=table%u)\n", in + 4, "", i,
+			gdn::TexCoord(ts.tex_coord).c_str(), gdn::TexMap(ts.tex_map == 0x1FF ? 0xFF : ts.tex_map).c_str(),
+			gdn::TevOrderChannel(ts.color).c_str(), static_cast<unsigned>(ts.ras_sel), static_cast<unsigned>(ts.tex_sel));
+
+		Print(os, "%*s    color: a=%s b=%s c=%s d=%s op=%s bias=%s scale=%s clamp=%u -> %s\n", in + 4, "",
+			gdn::TevColorArg(ts.color_in.a).c_str(), gdn::TevColorArg(ts.color_in.b).c_str(),
+			gdn::TevColorArg(ts.color_in.c).c_str(), gdn::TevColorArg(ts.color_in.d).c_str(),
+			gdn::TevOp(ts.color_in.op, false).c_str(), gdn::TevBias(ts.color_in.bias).c_str(),
+			gdn::TevScale(ts.color_in.scale).c_str(), static_cast<unsigned>(ts.color_in.clamp),
+			gdn::TevReg(ts.color_in.reg_id).c_str());
+
+		Print(os, "%*s    alpha: a=%s b=%s c=%s d=%s op=%s bias=%s scale=%s clamp=%u -> %s\n", in + 4, "",
+			gdn::TevAlphaArg(ts.alpha_in.a).c_str(), gdn::TevAlphaArg(ts.alpha_in.b).c_str(),
+			gdn::TevAlphaArg(ts.alpha_in.c).c_str(), gdn::TevAlphaArg(ts.alpha_in.d).c_str(),
+			gdn::TevOp(ts.alpha_in.op, true).c_str(), gdn::TevBias(ts.alpha_in.bias).c_str(),
+			gdn::TevScale(ts.alpha_in.scale).c_str(), static_cast<unsigned>(ts.alpha_in.clamp),
+			gdn::TevReg(ts.alpha_in.reg_id).c_str());
+
+		Print(os, "%*s    konst: color=%s alpha=%s\n", in + 4, "",
+			gdn::TevKSel(ts.color_in.constant_sel).c_str(), gdn::TevKSel(ts.alpha_in.constant_sel).c_str());
+
+		if (ts.ind.mtx != GX_ITM_OFF)
+			Print(os, "%*s    indirect: indtex=%u fmt=%s bias=%s mtx=%s wrap=%s/%s addprev=%u alpha=%s\n", in + 4, "",
+				static_cast<unsigned>(ts.ind.tex_id), gdn::IndFormat(ts.ind.format).c_str(),
+				gdn::IndBias(ts.ind.bias).c_str(), gdn::IndMtx(ts.ind.mtx).c_str(),
+				gdn::IndWrap(ts.ind.wrap_s).c_str(), gdn::IndWrap(ts.ind.wrap_t).c_str(),
+				static_cast<unsigned>(ts.ind.add_prev), gdn::IndAlpha(ts.ind.alpha).c_str());
+
+		const bool uses_texture = ts.color_in.a == 8 || ts.color_in.b == 8 || ts.color_in.c == 8 || ts.color_in.d == 8 ||
+			ts.color_in.a == 9 || ts.color_in.b == 9 || ts.color_in.c == 9 || ts.color_in.d == 9 ||
+			ts.alpha_in.a == 4 || ts.alpha_in.b == 4 || ts.alpha_in.c == 4 || ts.alpha_in.d == 4;
+
+		if (uses_texture && (ts.tex_map == 0x1FF || ts.tex_map == 0xFF || ts.tex_map >= flags.texture_map))
+			Print(os, "%*s    !! reads the texture colour but texture map %s is not one of this material's %u map(s)\n",
+				in + 4, "", gdn::TexMap(ts.tex_map == 0x1FF ? 0xFF : ts.tex_map).c_str(),
+				static_cast<unsigned>(flags.texture_map));
+	}
+
+	Print(os, "%*salpha compare: comp0=%s comp1=%s op=%s ref0=%u ref1=%u%s\n", in + 2, "",
+		gdn::Compare(alpha_compare.function & 0xF).c_str(), gdn::Compare(alpha_compare.function >> 4).c_str(),
+		gdn::AlphaOp(alpha_compare.op).c_str(), static_cast<unsigned>(alpha_compare.ref0),
+		static_cast<unsigned>(alpha_compare.ref1), flags.alpha_compare ? "" : " (default)");
+
+	Print(os, "%*sblend mode: type=%s src=%s dst=%s logic op=%s%s\n", in + 2, "",
+		gdn::BlendType(blend_mode.type).c_str(), gdn::BlendFactor(blend_mode.src_factor, true).c_str(),
+		gdn::BlendFactor(blend_mode.dst_factor, false).c_str(), gdn::LogicOp(blend_mode.logical_op).c_str(),
+		flags.blend_mode ? "" : " (default)");
+
+	DebugDescribeKeys(os, in + 2);
+}
+
+std::string Material::DebugState() const
+{
+	using gxdebug::Format;
+	namespace gdn = gxdebug::names;
+
+	std::string state = Format("color=%s", gdn::Color(color.r, color.g, color.b, color.a).c_str());
+
+	for (unsigned i = 0; i != 3; ++i)
+		state += Format(" reg%u=(%d,%d,%d,%d)", i, static_cast<int>(color_regs[i].r), static_cast<int>(color_regs[i].g),
+			static_cast<int>(color_regs[i].b), static_cast<int>(color_regs[i].a));
+
+	for (unsigned i = 0; i != 4; ++i)
+		state += Format(" konst%u=%s", i, gdn::Color(color_constants[i].r, color_constants[i].g, color_constants[i].b,
+			color_constants[i].a).c_str());
+
+	for (size_t i = 0; i != texture_srts.size(); ++i)
+		state += Format(" srt%zu=(t=%g,%g;r=%g;s=%g,%g)", i, static_cast<double>(texture_srts[i].translate_s),
+			static_cast<double>(texture_srts[i].translate_t), static_cast<double>(texture_srts[i].rotate),
+			static_cast<double>(texture_srts[i].scale_s), static_cast<double>(texture_srts[i].scale_t));
+
+	for (size_t i = 0; i != ind_srts.size(); ++i)
+		state += Format(" indsrt%zu=(t=%g,%g;r=%g;s=%g,%g)", i, static_cast<double>(ind_srts[i].translate_s),
+			static_cast<double>(ind_srts[i].translate_t), static_cast<double>(ind_srts[i].rotate),
+			static_cast<double>(ind_srts[i].scale_s), static_cast<double>(ind_srts[i].scale_t));
+
+	for (unsigned i = 0; i != MAX_TEX_MAP; ++i)
+		if (palette_texture[i] != PALETTE_DEFAULT)
+			state += Format(" palette%u=%u", i, static_cast<unsigned>(palette_texture[i]));
+
+	return state;
 }
 
 }

@@ -45,6 +45,17 @@ distribution.
 #include "../include/libwb/GXTexture.h"
 
 #include "../include/libwb/Funcs.h"
+#include "../include/libwb/GxDebug.h"
+
+namespace gdn = wb::gxdebug::names;
+
+#define GXTRACE(...) \
+	do { \
+		if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_GX)) \
+			wb::gxdebug::TraceGx(__func__, __VA_ARGS__); \
+	} while (0)
+
+#define GXU(x) static_cast<unsigned>(x)
 
 static uint8_t g_texture_decode_buffer[1024 * 1024 * 4];
 
@@ -88,7 +99,10 @@ static constexpr GLuint g_texmap_start_index = 0;
 // silly
 GXFifoObj * 	GX_Init (void *base, uint32_t size)
 {
-	glewInit();
+	GXTRACE("base=%p size=%u", base, GXU(size));
+
+	if (!wb::gxdebug::Headless())
+		glewInit();
 
 	//glGenTextures(1, &g_clip_texture);
 
@@ -144,7 +158,8 @@ struct GLTexObj
 
 	~GLTexObj()
 	{
-		glDeleteTextures(1, &tex);
+		if (tex)
+			glDeleteTextures(1, &tex);
 	}
 
 	bool operator<(const GLTexObj& rhs) const
@@ -249,6 +264,118 @@ struct GLTexObj
 
 std::set<GLTexObj> g_texture_cache;
 
+static void DebugDecodeTexture(const GLTexObj& t, uint8_t mapid)
+{
+	const auto& tlut = g_tlut_names[t.tlut_name];
+
+	static std::set<std::pair<const void*, const void*>> seen;
+	if (!seen.insert({ t.img_ptr, tlut.lut }).second)
+		return;
+
+	wb::gxdebug::Stats& stats = wb::gxdebug::GetStats();
+
+	if (!t.img_ptr)
+	{
+		++stats.texture_decode_failures;
+		wb::gxdebug::Log("[tex] !! map %u: no image data (the texture failed to load, or was never loaded)", GXU(mapid));
+		return;
+	}
+
+	wb::TexturePalette palette;
+	palette.data = static_cast<const uint8_t*>(tlut.lut);
+	palette.entries = tlut.entries;
+	palette.format = tlut.fmt;
+
+	const uint32_t num_levels = t.mipmap ? (uint32_t(t.max_lod) + 1) : 1;
+
+	wb::gxdebug::Log("[tex] map %u: img=%p %ux%u fmt=%s mipmap=%u (%u level%s) wrap=%s/%s filter=%s/%s%s",
+		GXU(mapid), t.img_ptr, GXU(t.wd), GXU(t.ht), gdn::TexFormat(t.fmt).c_str(), GXU(t.mipmap),
+		num_levels, num_levels == 1 ? "" : "s",
+		gdn::Wrap(t.wrap_s).c_str(), gdn::Wrap(t.wrap_t).c_str(),
+		gdn::TexFilter(t.minfilt).c_str(), gdn::TexFilter(t.magfilt).c_str(),
+		tlut.lut ? wb::gxdebug::Format(" tlut(name=%u entries=%u fmt=%s)", t.tlut_name, GXU(tlut.entries),
+			gdn::TlutFormat(tlut.fmt).c_str()).c_str() : "");
+
+	uint32_t level_width = t.wd;
+	uint32_t level_height = t.ht;
+	const uint8_t* level_src = reinterpret_cast<const uint8_t*>(t.img_ptr);
+
+	for (uint32_t level = 0; level < num_levels; ++level)
+	{
+		const uint32_t expanded_width  = wb::RoundUp(level_width, wb::GxBlockWidth(t.fmt));
+		const uint32_t expanded_height = wb::RoundUp(level_height, wb::GxBlockHeight(t.fmt));
+
+		wb::DecodedFormat decoded = wb::DecodedFormat::Invalid;
+
+		if (expanded_width && expanded_height &&
+			(size_t(expanded_width) * expanded_height * 4) <= sizeof(g_texture_decode_buffer))
+		{
+			decoded = wb::DecodeGxTexture(g_texture_decode_buffer, level_src,
+				expanded_width, expanded_height, t.fmt, tlut.lut ? &palette : nullptr);
+		}
+
+		if (decoded == wb::DecodedFormat::Invalid)
+		{
+			++stats.texture_decode_failures;
+			wb::gxdebug::Log("[tex]   !! level %u: %ux%u (stored %ux%u) failed to decode (unsupported format, missing palette or too large)",
+				level, level_width, level_height, expanded_width, expanded_height);
+			return;
+		}
+
+		++stats.textures_decoded;
+
+		const uint32_t bpp = wb::BytesPerPixel(decoded);
+		const char* const decoded_name =
+			decoded == wb::DecodedFormat::Luminance8 ? "L8 (alpha = intensity)" :
+			decoded == wb::DecodedFormat::LuminanceAlpha8 ? "LA8" : "RGBA8";
+
+		if (level == 0)
+		{
+			uint32_t hash = 2166136261u;
+			uint32_t alpha_min = 255, alpha_max = 0;
+			uint64_t opaque = 0, clear = 0;
+
+			for (uint32_t y = 0; y != level_height; ++y)
+			{
+				const uint8_t* row = g_texture_decode_buffer + size_t(y) * expanded_width * bpp;
+
+				for (uint32_t x = 0; x != level_width; ++x)
+				{
+					const uint8_t* pixel = row + size_t(x) * bpp;
+
+					for (uint32_t b = 0; b != bpp; ++b)
+						hash = (hash ^ pixel[b]) * 16777619u;
+
+					const uint32_t alpha =
+						decoded == wb::DecodedFormat::Rgba8 ? pixel[3] :
+						decoded == wb::DecodedFormat::LuminanceAlpha8 ? pixel[1] : pixel[0];
+
+					alpha_min = std::min(alpha_min, alpha);
+					alpha_max = std::max(alpha_max, alpha);
+					opaque += alpha == 255;
+					clear += alpha == 0;
+				}
+			}
+
+			const double pixels = double(level_width) * level_height;
+
+			wb::gxdebug::Log("[tex]   level 0: %ux%u (stored %ux%u) -> %s, fnv1a=%08x alpha=%u..%u opaque=%.1f%% transparent=%.1f%%",
+				level_width, level_height, expanded_width, expanded_height, decoded_name, hash,
+				alpha_min, alpha_max, pixels ? 100.0 * double(opaque) / pixels : 0.0,
+				pixels ? 100.0 * double(clear) / pixels : 0.0);
+		}
+		else
+		{
+			wb::gxdebug::Log("[tex]   level %u: %ux%u (stored %ux%u) -> %s", level, level_width, level_height,
+				expanded_width, expanded_height, decoded_name);
+		}
+
+		level_src += wb::GxTextureSize(expanded_width, expanded_height, t.fmt);
+		level_width  = std::max<uint32_t>(1, level_width  >> 1);
+		level_height = std::max<uint32_t>(1, level_height >> 1);
+	}
+}
+
 uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t mipmap, uint8_t maxlod)
 {
 	const uint32_t num_levels = mipmap ? (uint32_t(maxlod) + 1) : 1;
@@ -267,11 +394,15 @@ uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t m
 		level_h = std::max<uint32_t>(1, level_h >> 1);
 	}
 
+	GXTRACE("wd=%u ht=%u fmt=%s mipmap=%u maxlod=%u -> %u bytes", GXU(wd), GXU(ht), gdn::TexFormat(fmt).c_str(),
+		GXU(mipmap), GXU(maxlod), GXU(total));
+
 	return total;
 }
 
 void 	GX_InitTexObjTlut (GXTexObj *obj, uint32_t tlut_name)
 {
+	GXTRACE("obj=%p tlut_name=%u", (void*)obj, GXU(tlut_name));
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.tlut_name = tlut_name;
@@ -279,6 +410,7 @@ void 	GX_InitTexObjTlut (GXTexObj *obj, uint32_t tlut_name)
 
 void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, uint8_t fmt, uint16_t entries)
 {
+	GXTRACE("obj=%p lut=%p fmt=%s entries=%u", (void*)obj, lut, gdn::TlutFormat(fmt).c_str(), GXU(entries));
 	TlutObj& tlutobj = *reinterpret_cast<TlutObj*>(obj);
 
 	tlutobj.lut = lut;
@@ -288,6 +420,8 @@ void 	GX_InitTlutObj (GXTlutObj *obj, void *lut, uint8_t fmt, uint16_t entries)
 
 void 	GX_LoadTlut (GXTlutObj *obj, uint32_t tlut_name)
 {
+	GXTRACE("obj=%p tlut_name=%u (entries=%u fmt=%s)", (void*)obj, GXU(tlut_name),
+		GXU(reinterpret_cast<TlutObj*>(obj)->entries), gdn::TlutFormat(reinterpret_cast<TlutObj*>(obj)->fmt).c_str());
 	TlutObj& tlutobj = *reinterpret_cast<TlutObj*>(obj);
 
 	g_tlut_names[tlut_name] = tlutobj;
@@ -295,6 +429,8 @@ void 	GX_LoadTlut (GXTlutObj *obj, uint32_t tlut_name)
 
 void 	GX_InitTexObj (GXTexObj *obj, void *img_ptr, uint16_t wd, uint16_t ht, uint8_t fmt, uint8_t wrap_s, uint8_t wrap_t, uint8_t mipmap)
 {
+	GXTRACE("obj=%p img=%p %ux%u fmt=%s wrap=%s/%s mipmap=%u", (void*)obj, img_ptr, GXU(wd), GXU(ht),
+		gdn::TexFormat(fmt).c_str(), gdn::Wrap(wrap_s).c_str(), gdn::Wrap(wrap_t).c_str(), GXU(mipmap));
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.img_ptr = img_ptr;
@@ -323,6 +459,7 @@ void 	GX_InitTexObj (GXTexObj *obj, void *img_ptr, uint16_t wd, uint16_t ht, uin
 
 void 	GX_InitTexObjWrapMode (GXTexObj *obj, uint8_t wrap_s, uint8_t wrap_t)
 {
+	GXTRACE("obj=%p wrap=%s/%s", (void*)obj, gdn::Wrap(wrap_s).c_str(), gdn::Wrap(wrap_t).c_str());
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.wrap_s = wrap_s;
@@ -331,6 +468,7 @@ void 	GX_InitTexObjWrapMode (GXTexObj *obj, uint8_t wrap_s, uint8_t wrap_t)
 
 void 	GX_InitTexObjFilterMode (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt)
 {
+	GXTRACE("obj=%p min=%s mag=%s", (void*)obj, gdn::TexFilter(minfilt).c_str(), gdn::TexFilter(magfilt).c_str());
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.minfilt = minfilt;
@@ -339,6 +477,9 @@ void 	GX_InitTexObjFilterMode (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt)
 
 void 	GX_InitTexObjLOD (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt, f32 minlod, f32 maxlod, f32 lodbias, uint8_t biasclamp, uint8_t edgelod, uint8_t maxaniso)
 {
+	GXTRACE("obj=%p min=%s mag=%s minlod=%g maxlod=%g lodbias=%g biasclamp=%u edgelod=%u maxaniso=%u", (void*)obj,
+		gdn::TexFilter(minfilt).c_str(), gdn::TexFilter(magfilt).c_str(), double(minlod), double(maxlod), double(lodbias),
+		GXU(biasclamp), GXU(edgelod), GXU(maxaniso));
 	GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	txobj.minfilt = minfilt;
@@ -352,6 +493,12 @@ void 	GX_InitTexObjLOD (GXTexObj *obj, uint8_t minfilt, uint8_t magfilt, f32 min
 
 void 	GX_SetBlendMode (uint8_t type, uint8_t src_fact, uint8_t dst_fact, uint8_t op)
 {
+	GXTRACE("type=%s src=%s dst=%s op=%s", gdn::BlendType(type).c_str(), gdn::BlendFactor(src_fact, true).c_str(),
+		gdn::BlendFactor(dst_fact, false).c_str(), gdn::LogicOp(op).c_str());
+
+	if (wb::gxdebug::Headless())
+		return;
+
 	static const GLenum blend_types[] =
 	{
 		0,	// none
@@ -425,6 +572,12 @@ void 	GX_SetBlendMode (uint8_t type, uint8_t src_fact, uint8_t dst_fact, uint8_t
 // TODO: incomplete
 void 	GX_SetAlphaCompare (uint8_t comp0, uint8_t ref0, uint8_t aop, uint8_t comp1, uint8_t ref1)
 {
+	GXTRACE("comp0=%s ref0=%u aop=%s comp1=%s ref1=%u", gdn::Compare(comp0).c_str(), GXU(ref0),
+		gdn::AlphaOp(aop).c_str(), gdn::Compare(comp1).c_str(), GXU(ref1));
+
+	if (wb::gxdebug::Headless())
+		return;
+
 	static const GLenum alpha_funcs[] =
 	{
 		// GX order: NEVER, LESS, EQUAL, LEQUAL, GREATER, NEQUAL, GEQUAL, ALWAYS
@@ -573,6 +726,179 @@ std::map<ShaderKey, CompiledTevStages> g_compiled_tev_stages;
 TevStages g_active_stages;
 TexGens g_active_texgens;
 
+struct WGXDrawState
+{
+	f32 pos_mtx[10][16];
+	f32 tex_mtx[10][16];
+
+	uint32_t current_pos_mtx = GX_PNMTX0;
+
+	bool tex_mtx_dirty = true;
+
+	f32 projection[16];
+	GXColor clear_color{ 0, 0, 0, 255 };
+
+	bool pos = false;
+	bool clr0 = false;
+	bool tex[8] = {};
+
+	unsigned tex_units[8] = {};
+	unsigned tex_unit_count = 0;
+
+	bool vertex_pending = false;
+	bool vertex_3d = false;
+	f32 x = 0, y = 0, z = 0;
+	bool have_color = false;
+	uint8_t color[4] = {};
+	f32 texcoords[8][2] = {};
+	unsigned texcoord_count = 0;
+
+	WGXDrawState()
+	{
+		for (auto& m : pos_mtx)
+			Identity(m);
+		for (auto& m : tex_mtx)
+			Identity(m);
+		Identity(projection);
+	}
+
+	static void Identity(f32* m)
+	{
+		memset(m, 0, 16 * sizeof(f32));
+		m[0] = m[5] = m[10] = m[15] = 1.f;
+	}
+};
+
+static WGXDrawState g_draw;
+
+static void DescribeShaderConfig(std::ostream& os, const TevStages& stages, const TexGens& texgens,
+	const IndStages& ind_stages)
+{
+	using wb::gxdebug::Print;
+
+	for (size_t i = 0; i != texgens.size(); ++i)
+		Print(os, "  texgen[%zu]: type=%s src=%s mtx=%s\n", i, gdn::TexGenType(texgens[i].tgen_typ).c_str(),
+			gdn::TexGenSrc(texgens[i].tgen_src).c_str(), gdn::TexMtx(texgens[i].mtxsrc).c_str());
+
+	for (size_t i = 0; i != ind_stages.size(); ++i)
+		Print(os, "  indstage[%zu]: coord=%s map=%s scale=%s/%s\n", i, gdn::TexCoord(ind_stages[i].tex_coord).c_str(),
+			gdn::TexMap(ind_stages[i].tex_map).c_str(), gdn::IndScale(ind_stages[i].scale_s).c_str(),
+			gdn::IndScale(ind_stages[i].scale_t).c_str());
+
+	for (size_t i = 0; i != stages.size(); ++i)
+	{
+		const TevStageProps& ts = stages[i];
+
+		Print(os, "  stage %zu: coord=%s map=%s swap(ras=%s tex=%s)\n", i, gdn::TexCoord(ts.texcoord).c_str(),
+			gdn::TexMap(ts.texmap).c_str(), gdn::SwapTable(ts.ras_swap).c_str(), gdn::SwapTable(ts.tex_swap).c_str());
+
+		Print(os, "    color: a=%s b=%s c=%s d=%s op=%s bias=%s scale=%s clamp=%u -> %s\n",
+			gdn::TevColorArg(ts.color_a).c_str(), gdn::TevColorArg(ts.color_b).c_str(),
+			gdn::TevColorArg(ts.color_c).c_str(), gdn::TevColorArg(ts.color_d).c_str(),
+			gdn::TevOp(ts.color_op, false).c_str(), gdn::TevBias(ts.color_bias).c_str(),
+			gdn::TevScale(ts.color_scale).c_str(), GXU(ts.color_clamp), gdn::TevReg(ts.color_regid).c_str());
+
+		Print(os, "    alpha: a=%s b=%s c=%s d=%s op=%s bias=%s scale=%s clamp=%u -> %s\n",
+			gdn::TevAlphaArg(ts.alpha_a).c_str(), gdn::TevAlphaArg(ts.alpha_b).c_str(),
+			gdn::TevAlphaArg(ts.alpha_c).c_str(), gdn::TevAlphaArg(ts.alpha_d).c_str(),
+			gdn::TevOp(ts.alpha_op, true).c_str(), gdn::TevBias(ts.alpha_bias).c_str(),
+			gdn::TevScale(ts.alpha_scale).c_str(), GXU(ts.alpha_clamp), gdn::TevReg(ts.alpha_regid).c_str());
+
+		Print(os, "    konst: color=%s alpha=%s\n", gdn::TevKSel(ts.kcolor_sel).c_str(), gdn::TevKSel(ts.kalpha_sel).c_str());
+
+		if (ts.ind_mtxid != GX_ITM_OFF)
+			Print(os, "    indirect: indtex=%u fmt=%s bias=%s mtx=%s wrap=%s/%s addprev=%u alpha=%s\n", GXU(ts.ind_texid),
+				gdn::IndFormat(ts.ind_format).c_str(), gdn::IndBias(ts.ind_bias).c_str(), gdn::IndMtx(ts.ind_mtxid).c_str(),
+				gdn::IndWrap(ts.ind_wrap_s).c_str(), gdn::IndWrap(ts.ind_wrap_t).c_str(), GXU(ts.ind_addprev),
+				gdn::IndAlpha(ts.ind_alpha).c_str());
+	}
+}
+
+static IndStages CurrentIndStages()
+{
+	IndStages ind_stages;
+	for (unsigned int i = 0; i != g_num_ind_stages && i != 4; ++i)
+	{
+		IndStageProps isp;
+		isp.tex_coord = g_ind_tex_order[i].tex_coord;
+		isp.tex_map = g_ind_tex_order[i].tex_map;
+		isp.scale_s = g_ind_tex_coord_scale[i].scale_s;
+		isp.scale_t = g_ind_tex_coord_scale[i].scale_t;
+		ind_stages.push_back(isp);
+	}
+
+	return ind_stages;
+}
+
+static int g_debug_shader_id = 0;
+
+static std::string PrettyGlsl(const std::string& source)
+{
+	std::string out;
+	int depth = 0;
+	int parens = 0;
+
+	auto newline = [&]()
+	{
+		out.push_back('\n');
+		out.append(size_t(depth) * 2, ' ');
+	};
+
+	for (const char c : source)
+	{
+		if (c == '(')
+			++parens;
+		else if (c == ')')
+			--parens;
+
+		if (c == '{')
+		{
+			out.push_back(c);
+			++depth;
+			newline();
+		}
+		else if (c == '}')
+		{
+			while (!out.empty() && out.back() == ' ')
+				out.pop_back();
+			if (!out.empty() && out.back() == '\n')
+				out.pop_back();
+
+			--depth;
+			newline();
+			out.push_back(c);
+			newline();
+		}
+		else if (c == ';' && parens == 0)
+		{
+			out.push_back(c);
+			newline();
+		}
+		else if (c == '\n')
+		{
+			newline();
+		}
+		else
+		{
+			out.push_back(c);
+		}
+	}
+
+	while (!out.empty() && (out.back() == ' ' || out.back() == '\n'))
+		out.pop_back();
+
+	return out;
+}
+
+static void DebugReportShader(const std::string& vertex, const std::string& fragment)
+{
+	if (!wb::gxdebug::Tracing(wb::gxdebug::TRACE_GLSL))
+		return;
+
+	wb::gxdebug::Log("[glsl] shader #%d vertex shader:\n%s", g_debug_shader_id, PrettyGlsl(vertex).c_str());
+	wb::gxdebug::Log("[glsl] shader #%d fragment shader:\n%s", g_debug_shader_id, PrettyGlsl(fragment).c_str());
+}
+
 void CompiledTevStages::Enable()
 {
 	glUseProgram(program);
@@ -682,17 +1008,19 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	vert_ss << '}';
 
-	vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-
+	if (!wb::gxdebug::Headless())
 	{
-	const auto& vert_src_str = vert_ss.str();
-	const GLchar* vert_src = vert_src_str.c_str();
-	glShaderSource(vertex_shader, 1, &vert_src, nullptr);
+		vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+
+		const auto& vert_src_str = vert_ss.str();
+		const GLchar* vert_src = vert_src_str.c_str();
+		glShaderSource(vertex_shader, 1, &vert_src, nullptr);
 	}
 
 	}	// done generating vertex shader
 
-	glCompileShader(vertex_shader);
+	if (!wb::gxdebug::Headless())
+		glCompileShader(vertex_shader);
 
 	// generate fragment shader code
 	std::ostringstream frag_ss;
@@ -1025,16 +1353,22 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 	//wb::logger << frag_ss.str() << '\n';
 
-	// create/compile fragment shader
-	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-
+	if (!wb::gxdebug::Headless())
 	{
-	const auto& frag_src_str = frag_ss.str();
-	const GLchar* frag_src = frag_src_str.c_str();
-	glShaderSource(fragment_shader, 1, &frag_src, nullptr);
+		fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+
+		const auto& frag_src_str = frag_ss.str();
+		const GLchar* frag_src = frag_src_str.c_str();
+		glShaderSource(fragment_shader, 1, &frag_src, nullptr);
 	}
 
-	}	// done generating fragment shader
+	}
+
+	if (wb::gxdebug::Headless())
+	{
+		DebugReportShader(vert_ss.str(), frag_ss.str());
+		return;
+	}
 
 	glCompileShader(fragment_shader);
 
@@ -1095,12 +1429,22 @@ void CompiledTevStages::Compile(const TevStages& stages, const TexGens& texgens,
 
 void 	GX_LoadTexObj (GXTexObj *obj, uint8_t mapid)
 {
+	GXTRACE("obj=%p map=%u", (void*)obj, GXU(mapid));
+
 	const GLTexObj& txobj = *reinterpret_cast<GLTexObj*>(obj);
 
 	if (mapid < 8)
 	{
 		g_texmap_dims[mapid][0] = static_cast<float>(txobj.wd);
 		g_texmap_dims[mapid][1] = static_cast<float>(txobj.ht);
+	}
+
+	if (wb::gxdebug::Headless())
+	{
+		if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_TEXTURE))
+			DebugDecodeTexture(txobj, mapid);
+
+		return;
 	}
 
 	glActiveTexture(GL_TEXTURE0 + g_texmap_start_index + mapid);
@@ -1162,6 +1506,9 @@ inline void ActiveStage(uint8_t stage)
 
 void 	GX_SetTevOrder (uint8_t tevstage, uint8_t texcoord, uint32_t texmap, uint8_t color)
 {
+	GXTRACE("stage=%u coord=%s map=%s chan=%s", GXU(tevstage), gdn::TexCoord(texcoord).c_str(),
+		gdn::TexMap(texmap).c_str(), gdn::TevOrderChannel(color).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1173,6 +1520,9 @@ void 	GX_SetTevOrder (uint8_t tevstage, uint8_t texcoord, uint32_t texmap, uint8
 
 void 	GX_SetTevSwapMode (uint8_t tevstage, uint8_t ras_sel, uint8_t tex_sel)
 {
+	GXTRACE("stage=%u ras=table%u(%s) tex=table%u(%s)", GXU(tevstage), GXU(ras_sel),
+		gdn::SwapTable(g_tev_swap_tables[ras_sel & 3]).c_str(), GXU(tex_sel), gdn::SwapTable(g_tev_swap_tables[tex_sel & 3]).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1182,6 +1532,8 @@ void 	GX_SetTevSwapMode (uint8_t tevstage, uint8_t ras_sel, uint8_t tex_sel)
 
 void 	GX_SetTevSwapModeTable (uint8_t table, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
+	GXTRACE("table=%u r=%u g=%u b=%u a=%u", GXU(table), GXU(r), GXU(g), GXU(b), GXU(a));
+
 	g_tev_swap_tables[table & 3] = (r & 3) | ((g & 3) << 2)
 		| ((b & 3) << 4) | ((a & 3) << 6);
 }
@@ -1189,6 +1541,10 @@ void 	GX_SetTevSwapModeTable (uint8_t table, uint8_t r, uint8_t g, uint8_t b, ui
 void 	GX_SetTevIndirect (uint8_t tevstage, uint8_t indtexid, uint8_t format, uint8_t bias, uint8_t mtxid,
 	uint8_t wrap_s, uint8_t wrap_t, uint8_t addprev, uint8_t utclod, uint8_t a)
 {
+	GXTRACE("stage=%u indtex=%u fmt=%s bias=%s mtx=%s wrap=%s/%s addprev=%u utclod=%u alpha=%s", GXU(tevstage),
+		GXU(indtexid), gdn::IndFormat(format).c_str(), gdn::IndBias(bias).c_str(), gdn::IndMtx(mtxid).c_str(),
+		gdn::IndWrap(wrap_s).c_str(), gdn::IndWrap(wrap_t).c_str(), GXU(addprev), GXU(utclod), gdn::IndAlpha(a).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1206,6 +1562,8 @@ void 	GX_SetTevIndirect (uint8_t tevstage, uint8_t indtexid, uint8_t format, uin
 
 void 	GX_SetIndTexOrder (uint8_t ind_stage, uint8_t tex_coord, uint8_t tex_map)
 {
+	GXTRACE("ind_stage=%u coord=%s map=%s", GXU(ind_stage), gdn::TexCoord(tex_coord).c_str(), gdn::TexMap(tex_map).c_str());
+
 	if (ind_stage < 4)
 	{
 		g_ind_tex_order[ind_stage].tex_coord = tex_coord;
@@ -1215,6 +1573,8 @@ void 	GX_SetIndTexOrder (uint8_t ind_stage, uint8_t tex_coord, uint8_t tex_map)
 
 void 	GX_SetIndTexCoordScale (uint8_t ind_stage, uint8_t scale_s, uint8_t scale_t)
 {
+	GXTRACE("ind_stage=%u scale_s=%s scale_t=%s", GXU(ind_stage), gdn::IndScale(scale_s).c_str(), gdn::IndScale(scale_t).c_str());
+
 	if (ind_stage < 4)
 	{
 		g_ind_tex_coord_scale[ind_stage].scale_s = scale_s;
@@ -1224,6 +1584,10 @@ void 	GX_SetIndTexCoordScale (uint8_t ind_stage, uint8_t scale_s, uint8_t scale_
 
 void GX_SetIndTexMatrix(uint8_t mtx_ind, Mtx23 offset_mtx, int8_t scale_exp)
 {
+	GXTRACE("mtx=%s [[%g %g %g] [%g %g %g]] scale_exp=%d", gdn::IndMtx(mtx_ind).c_str(),
+		double(offset_mtx[0][0]), double(offset_mtx[0][1]), double(offset_mtx[0][2]),
+		double(offset_mtx[1][0]), double(offset_mtx[1][1]), double(offset_mtx[1][2]), int(scale_exp));
+
     if (mtx_ind >= GX_ITM_0 && mtx_ind <= GX_ITM_2)
     {
         const unsigned int index = mtx_ind - GX_ITM_0;
@@ -1238,23 +1602,31 @@ void GX_SetIndTexMatrix(uint8_t mtx_ind, Mtx23 offset_mtx, int8_t scale_exp)
 
 void 	GX_SetNumIndStages (uint8_t num_stages)
 {
+	GXTRACE("num=%u", GXU(num_stages));
+
 	g_num_ind_stages = num_stages;
 }
 
 void 	GX_SetTevColorS10 (uint8_t tev_regid, GXColorS10 color)
 {
+	GXTRACE("reg=%s color=(%d,%d,%d,%d)", gdn::TevReg(tev_regid).c_str(), int(color.r), int(color.g), int(color.b), int(color.a));
+
 	for (unsigned int i = 0; i != 4; ++i)
 		g_color_registers[tev_regid - 1][i] = (float)(&color.r)[i] / 255;
 }
 
 void 	GX_SetTevKColor (uint8_t tev_regid, GXColor color)
 {
+	GXTRACE("reg=K%u color=%s", GXU(tev_regid), gdn::Color(color.r, color.g, color.b, color.a).c_str());
+
 	for (unsigned int i = 0; i != 4; ++i)
 		g_kcolor_registers[tev_regid][i] = (float)(&color.r)[i] / 255;
 }
 
 void 	GX_SetTevKAlphaSel (uint8_t tevstage, uint8_t sel)
 {
+	GXTRACE("stage=%u sel=%s", GXU(tevstage), gdn::TevKSel(sel).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1263,6 +1635,8 @@ void 	GX_SetTevKAlphaSel (uint8_t tevstage, uint8_t sel)
 
 void 	GX_SetTevKColorSel (uint8_t tevstage, uint8_t sel)
 {
+	GXTRACE("stage=%u sel=%s", GXU(tevstage), gdn::TevKSel(sel).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1271,6 +1645,9 @@ void 	GX_SetTevKColorSel (uint8_t tevstage, uint8_t sel)
 
 void 	GX_SetTevAlphaIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 {
+	GXTRACE("stage=%u a=%s b=%s c=%s d=%s", GXU(tevstage), gdn::TevAlphaArg(a).c_str(), gdn::TevAlphaArg(b).c_str(),
+		gdn::TevAlphaArg(c).c_str(), gdn::TevAlphaArg(d).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1282,6 +1659,9 @@ void 	GX_SetTevAlphaIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8
 
 void 	GX_SetTevAlphaOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_t tevscale, uint8_t clamp, uint8_t tevregid)
 {
+	GXTRACE("stage=%u op=%s bias=%s scale=%s clamp=%u out=%s", GXU(tevstage), gdn::TevOp(tevop, true).c_str(),
+		gdn::TevBias(tevbias).c_str(), gdn::TevScale(tevscale).c_str(), GXU(clamp), gdn::TevReg(tevregid).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1294,6 +1674,9 @@ void 	GX_SetTevAlphaOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_
 
 void 	GX_SetTevColorIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 {
+	GXTRACE("stage=%u a=%s b=%s c=%s d=%s", GXU(tevstage), gdn::TevColorArg(a).c_str(), gdn::TevColorArg(b).c_str(),
+		gdn::TevColorArg(c).c_str(), gdn::TevColorArg(d).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1305,6 +1688,9 @@ void 	GX_SetTevColorIn (uint8_t tevstage, uint8_t a, uint8_t b, uint8_t c, uint8
 
 void 	GX_SetTevColorOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_t tevscale, uint8_t clamp, uint8_t tevregid)
 {
+	GXTRACE("stage=%u op=%s bias=%s scale=%s clamp=%u out=%s", GXU(tevstage), gdn::TevOp(tevop, false).c_str(),
+		gdn::TevBias(tevbias).c_str(), gdn::TevScale(tevscale).c_str(), GXU(clamp), gdn::TevReg(tevregid).c_str());
+
 	ActiveStage(tevstage);
 
 	TevStageProps& ts = g_active_stages[tevstage];
@@ -1317,6 +1703,9 @@ void 	GX_SetTevColorOp (uint8_t tevstage, uint8_t tevop, uint8_t tevbias, uint8_
 
 void 	GX_SetTexCoordGen (uint8_t texcoord, uint8_t tgen_typ, uint8_t tgen_src, uint8_t mtxsrc)
 {
+	GXTRACE("coord=%s type=%s src=%s mtx=%s", gdn::TexCoord(texcoord).c_str(), gdn::TexGenType(tgen_typ).c_str(),
+		gdn::TexGenSrc(tgen_src).c_str(), gdn::TexMtx(mtxsrc).c_str());
+
 	if (texcoord >= g_active_texgens.size())
 		g_active_texgens.resize(texcoord + 1);
 
@@ -1324,15 +1713,23 @@ void 	GX_SetTexCoordGen (uint8_t texcoord, uint8_t tgen_typ, uint8_t tgen_src, u
 	tg.tgen_typ = tgen_typ;
 	tg.tgen_src = tgen_src;
 	tg.mtxsrc = mtxsrc;
+
+	g_draw.tex_mtx_dirty = true;
 }
 
 void 	GX_SetNumTexGens (uint8_t num)
 {
+	GXTRACE("num=%u", GXU(num));
+
 	g_active_texgens.resize(num);
+
+	g_draw.tex_mtx_dirty = true;
 }
 
 void 	GX_SetNumTevStages (uint8_t num)
 {
+	GXTRACE("num=%u", GXU(num));
+
 	g_active_stages.resize(num);
 
 	IndStages ind_stages;
@@ -1347,6 +1744,45 @@ void 	GX_SetNumTevStages (uint8_t num)
 	}
 
 	const ShaderKey key{ g_active_stages, g_active_texgens, ind_stages };
+
+	if (wb::gxdebug::Headless())
+	{
+		static std::map<ShaderKey, int> shader_ids;
+
+		auto found = shader_ids.find(key);
+		const bool is_new = found == shader_ids.end();
+
+		if (is_new)
+			found = shader_ids.emplace(key, int(shader_ids.size()) + 1).first;
+
+		g_debug_shader_id = found->second;
+
+		wb::gxdebug::Stats& stats = wb::gxdebug::GetStats();
+		++(is_new ? stats.shaders_generated : stats.shaders_reused);
+
+		if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_GX))
+		{
+			wb::gxdebug::Log("[gx] => shader #%d (%s), %zu tev stage(s), %zu texgen(s), %zu indirect stage(s)",
+				g_debug_shader_id, is_new ? "new" : "reused", g_active_stages.size(),
+				g_active_texgens.size(), ind_stages.size());
+
+			if (is_new)
+			{
+				std::ostringstream description;
+				DescribeShaderConfig(description, g_active_stages, g_active_texgens, ind_stages);
+				wb::gxdebug::Log("%s", description.str().c_str());
+			}
+		}
+
+		if (is_new)
+		{
+			CompiledTevStages scratch;
+			scratch.Compile(g_active_stages, g_active_texgens, ind_stages);
+		}
+
+		return;
+	}
+
 	CompiledTevStages& comptevs = g_compiled_tev_stages[key];
 
 	// compile program if needed
@@ -1355,4 +1791,584 @@ void 	GX_SetNumTevStages (uint8_t num)
 
 	// enable the program
 	comptevs.Enable();
+}
+
+static std::string MtxText(const Mtx m, int rows)
+{
+	std::string text = "[";
+	for (int r = 0; r != rows; ++r)
+	{
+		text += r ? " [" : "[";
+		for (int c = 0; c != 4; ++c)
+			text += wb::gxdebug::Format(c ? " %g" : "%g", double(m[r][c]));
+		text += "]";
+	}
+	return text + "]";
+}
+
+static void ExpandMtx(const Mtx m, int rows, f32* out)
+{
+	for (int c = 0; c != 4; ++c)
+	{
+		for (int r = 0; r != 3; ++r)
+			out[c * 4 + r] = r < rows ? m[r][c] : (r == c ? 1.f : 0.f);
+
+		out[c * 4 + 3] = c == 3 ? 1.f : 0.f;
+	}
+}
+
+void 	guMtxIdentity (Mtx mt)
+{
+	for (int r = 0; r != 3; ++r)
+		for (int c = 0; c != 4; ++c)
+			mt[r][c] = r == c ? 1.f : 0.f;
+}
+
+void 	guMtxConcat (const Mtx a, const Mtx b, Mtx ab)
+{
+	Mtx result;
+
+	for (int r = 0; r != 3; ++r)
+		for (int c = 0; c != 4; ++c)
+			result[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c] + (c == 3 ? a[r][3] : 0.f);
+
+	memcpy(ab, result, sizeof(Mtx));
+}
+
+void 	guMtxTrans (Mtx mt, f32 xT, f32 yT, f32 zT)
+{
+	guMtxIdentity(mt);
+	mt[0][3] = xT;
+	mt[1][3] = yT;
+	mt[2][3] = zT;
+}
+
+void 	guMtxScale (Mtx mt, f32 xS, f32 yS, f32 zS)
+{
+	guMtxIdentity(mt);
+	mt[0][0] = xS;
+	mt[1][1] = yS;
+	mt[2][2] = zS;
+}
+
+void 	guMtxRotRad (Mtx mt, char axis, f32 rad)
+{
+	const f32 s = std::sin(rad);
+	const f32 c = std::cos(rad);
+
+	guMtxIdentity(mt);
+
+	switch (axis)
+	{
+	case 'x': case 'X':
+		mt[1][1] = c;  mt[1][2] = -s;
+		mt[2][1] = s;  mt[2][2] = c;
+		break;
+	case 'y': case 'Y':
+		mt[0][0] = c;  mt[0][2] = s;
+		mt[2][0] = -s; mt[2][2] = c;
+		break;
+	case 'z': case 'Z':
+		mt[0][0] = c;  mt[0][1] = -s;
+		mt[1][0] = s;  mt[1][1] = c;
+		break;
+	}
+}
+
+void 	guMtxRotDeg (Mtx mt, char axis, f32 deg)
+{
+	guMtxRotRad(mt, axis, deg * 3.14159265358979323846f / 180.f);
+}
+
+void 	guOrtho (Mtx44 mt, f32 t, f32 b, f32 l, f32 r, f32 n, f32 f)
+{
+	memset(mt, 0, sizeof(Mtx44));
+
+	mt[0][0] = 2.f / (r - l);
+	mt[0][3] = -(r + l) / (r - l);
+	mt[1][1] = 2.f / (t - b);
+	mt[1][3] = -(t + b) / (t - b);
+	mt[2][2] = -1.f / (f - n);
+	mt[2][3] = -f / (f - n);
+	mt[3][3] = 1.f;
+}
+
+void 	GX_SetViewport (f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ)
+{
+	GXTRACE("x=%g y=%g w=%g h=%g near=%g far=%g", double(xOrig), double(yOrig), double(wd), double(ht),
+		double(nearZ), double(farZ));
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	glViewport(static_cast<GLint>(xOrig), static_cast<GLint>(yOrig), static_cast<GLsizei>(wd), static_cast<GLsizei>(ht));
+	glDepthRange(nearZ, farZ);
+}
+
+void 	GX_LoadProjectionMtx (Mtx44 mt, uint8_t type)
+{
+	GXTRACE("type=%s [[%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]]",
+		type == GX_ORTHOGRAPHIC ? "ORTHOGRAPHIC" : "PERSPECTIVE",
+		double(mt[0][0]), double(mt[0][1]), double(mt[0][2]), double(mt[0][3]),
+		double(mt[1][0]), double(mt[1][1]), double(mt[1][2]), double(mt[1][3]),
+		double(mt[2][0]), double(mt[2][1]), double(mt[2][2]), double(mt[2][3]),
+		double(mt[3][0]), double(mt[3][1]), double(mt[3][2]), double(mt[3][3]));
+
+	// column-major, and GX clips depth to -w..0 where GL clips to -w..w: z' = 2z + w
+	for (int c = 0; c != 4; ++c)
+	{
+		g_draw.projection[c * 4 + 0] = mt[0][c];
+		g_draw.projection[c * 4 + 1] = mt[1][c];
+		g_draw.projection[c * 4 + 2] = 2.f * mt[2][c] + mt[3][c];
+		g_draw.projection[c * 4 + 3] = mt[3][c];
+	}
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadMatrixf(g_draw.projection);
+	glMatrixMode(GL_MODELVIEW);
+}
+
+void 	GX_LoadPosMtxImm (Mtx mt, uint32_t pnidx)
+{
+	GXTRACE("slot=%u %s", GXU(pnidx), MtxText(mt, 3).c_str());
+
+	if (pnidx % 3 || pnidx / 3 >= 10)
+		return;
+
+	ExpandMtx(mt, 3, g_draw.pos_mtx[pnidx / 3]);
+
+	if (pnidx == g_draw.current_pos_mtx && !wb::gxdebug::Headless())
+	{
+		glMatrixMode(GL_MODELVIEW);
+		glLoadMatrixf(g_draw.pos_mtx[pnidx / 3]);
+	}
+}
+
+void 	GX_SetCurrentMtx (uint32_t mtx)
+{
+	GXTRACE("slot=%u", GXU(mtx));
+
+	if (mtx % 3 || mtx / 3 >= 10)
+		return;
+
+	g_draw.current_pos_mtx = mtx;
+
+	if (!wb::gxdebug::Headless())
+	{
+		glMatrixMode(GL_MODELVIEW);
+		glLoadMatrixf(g_draw.pos_mtx[mtx / 3]);
+	}
+}
+
+void 	GX_LoadTexMtxImm (Mtx mt, uint32_t texidx, uint8_t type)
+{
+	GXTRACE("%s type=%s %s", gdn::TexMtx(texidx).c_str(), type == GX_MTX2x4 ? "MTX2x4" : "MTX3x4",
+		MtxText(mt, type == GX_MTX2x4 ? 2 : 3).c_str());
+
+	if (texidx < GX_TEXMTX0 || texidx > GX_TEXMTX9 || (texidx - GX_TEXMTX0) % 3)
+		return;
+
+	ExpandMtx(mt, type == GX_MTX2x4 ? 2 : 3, g_draw.tex_mtx[(texidx - GX_TEXMTX0) / 3]);
+	g_draw.tex_mtx_dirty = true;
+}
+
+void 	GX_SetZMode (uint8_t enable, uint8_t func, uint8_t update_enable)
+{
+	GXTRACE("enable=%u func=%s update=%u", GXU(enable), gdn::Compare(func).c_str(), GXU(update_enable));
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	if (enable)
+		glEnable(GL_DEPTH_TEST);
+	else
+		glDisable(GL_DEPTH_TEST);
+
+	glDepthFunc(GL_NEVER + func);
+	glDepthMask(update_enable ? GL_TRUE : GL_FALSE);
+}
+
+void 	GX_SetChanMatColor (int32_t channel, GXColor color)
+{
+	GXTRACE("channel=%d color=%s", int(channel), gdn::Color(color.r, color.g, color.b, color.a).c_str());
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	// the "current colour": used for vertices that do not carry their own
+	glColor4ubv(&color.r);
+}
+
+void 	GX_SetCopyClear (GXColor clear_clr, uint32_t clear_z)
+{
+	GXTRACE("color=%s z=%u", gdn::Color(clear_clr.r, clear_clr.g, clear_clr.b, clear_clr.a).c_str(), GXU(clear_z));
+
+	g_draw.clear_color = clear_clr;
+}
+
+void 	GX_ClearVtxDesc (void)
+{
+	GXTRACE("");
+
+	g_draw.pos = false;
+	g_draw.clr0 = false;
+	memset(g_draw.tex, 0, sizeof(g_draw.tex));
+}
+
+void 	GX_SetVtxDesc (uint8_t attr, uint8_t type)
+{
+	const std::string attr_name =
+		attr == GX_VA_POS ? "POS" :
+		attr == GX_VA_NRM ? "NRM" :
+		attr == GX_VA_CLR0 ? "CLR0" :
+		attr == GX_VA_CLR1 ? "CLR1" :
+		attr >= GX_VA_TEX0 && attr <= GX_VA_TEX7 ? "TEX" + std::to_string(attr - GX_VA_TEX0) :
+		"?(" + std::to_string(attr) + ")";
+
+	GXTRACE("attr=%s type=%s", attr_name.c_str(), type == GX_DIRECT ? "DIRECT" : type == GX_NONE ? "NONE" : "INDEX");
+
+	const bool enabled = type != GX_NONE;
+
+	if (attr == GX_VA_POS)
+		g_draw.pos = enabled;
+	else if (attr == GX_VA_CLR0)
+		g_draw.clr0 = enabled;
+	else if (attr >= GX_VA_TEX0 && attr <= GX_VA_TEX7)
+		g_draw.tex[attr - GX_VA_TEX0] = enabled;
+}
+
+void 	GX_SetVtxAttrFmt (uint8_t vtxfmt, uint32_t vtxattr, uint32_t comptype, uint32_t compsize, uint32_t frac)
+{
+	GXTRACE("fmt=%u attr=%u comptype=%u compsize=%u frac=%u", GXU(vtxfmt), GXU(vtxattr), GXU(comptype), GXU(compsize), GXU(frac));
+}
+
+// hands the texture matrices to the texture units: unit n uses what texgen n asks for
+static void ApplyTexMatrices()
+{
+	if (!g_draw.tex_mtx_dirty)
+		return;
+
+	g_draw.tex_mtx_dirty = false;
+
+	f32 identity[16];
+	WGXDrawState::Identity(identity);
+
+	glMatrixMode(GL_TEXTURE);
+
+	for (unsigned unit = 0; unit != 8; ++unit)
+	{
+		const f32* matrix = identity;
+
+		if (unit < g_active_texgens.size())
+		{
+			const TexGenProps& tg = g_active_texgens[unit];
+
+			if (tg.tgen_typ == GX_TG_MTX2x4 && tg.mtxsrc >= GX_TEXMTX0 && tg.mtxsrc <= GX_TEXMTX9 &&
+				(tg.mtxsrc - GX_TEXMTX0) % 3 == 0)
+			{
+				matrix = g_draw.tex_mtx[(tg.mtxsrc - GX_TEXMTX0) / 3];
+			}
+		}
+
+		glActiveTexture(GL_TEXTURE0 + unit);
+		glLoadMatrixf(matrix);
+	}
+
+	glMatrixMode(GL_MODELVIEW);
+}
+
+static void FlushVertex()
+{
+	if (!g_draw.vertex_pending)
+		return;
+
+	g_draw.vertex_pending = false;
+
+	if (g_draw.have_color)
+		glColor4ub(g_draw.color[0], g_draw.color[1], g_draw.color[2], g_draw.color[3]);
+
+	for (unsigned i = 0; i != g_draw.texcoord_count && i != g_draw.tex_unit_count; ++i)
+		glMultiTexCoord2fv(GL_TEXTURE0 + g_draw.tex_units[i], g_draw.texcoords[i]);
+
+	if (g_draw.vertex_3d)
+		glVertex3f(g_draw.x, g_draw.y, g_draw.z);
+	else
+		glVertex2f(g_draw.x, g_draw.y);
+}
+
+void 	GX_Begin (uint8_t primitve, uint8_t vtxfmt, uint16_t vtxcnt)
+{
+	if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_GX))
+	{
+		std::string attributes = g_draw.pos ? "POS" : "";
+		if (g_draw.clr0)
+			attributes += " CLR0";
+		for (unsigned i = 0; i != 8; ++i)
+			if (g_draw.tex[i])
+				attributes += wb::gxdebug::Format(" TEX%u", i);
+
+		wb::gxdebug::TraceGx("GX_Begin", "primitive=0x%02x fmt=%u vertices=%u attributes: %s", GXU(primitve), GXU(vtxfmt),
+			GXU(vtxcnt), attributes.c_str());
+	}
+
+	g_draw.vertex_pending = false;
+	g_draw.tex_unit_count = 0;
+	for (unsigned i = 0; i != 8; ++i)
+		if (g_draw.tex[i])
+			g_draw.tex_units[g_draw.tex_unit_count++] = i;
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	ApplyTexMatrices();
+
+	GLenum mode = GL_QUADS;
+	switch (primitve)
+	{
+	case GX_POINTS: mode = GL_POINTS; break;
+	case GX_LINES: mode = GL_LINES; break;
+	case GX_LINESTRIP: mode = GL_LINE_STRIP; break;
+	case GX_TRIANGLES: mode = GL_TRIANGLES; break;
+	case GX_TRIANGLESTRIP: mode = GL_TRIANGLE_STRIP; break;
+	case GX_TRIANGLEFAN: mode = GL_TRIANGLE_FAN; break;
+	default: break;
+	}
+
+	glBegin(mode);
+}
+
+void 	GX_End (void)
+{
+	GXTRACE("");
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	FlushVertex();
+	glEnd();
+}
+
+// per vertex data is not traced individually: it is a lot of calls for little information
+
+void 	GX_Position2f32 (f32 x, f32 y)
+{
+	if (wb::gxdebug::Headless())
+		return;
+
+	FlushVertex();
+
+	g_draw.vertex_pending = true;
+	g_draw.vertex_3d = false;
+	g_draw.x = x;
+	g_draw.y = y;
+	g_draw.z = 0.f;
+	g_draw.have_color = false;
+	g_draw.texcoord_count = 0;
+}
+
+void 	GX_Position3f32 (f32 x, f32 y, f32 z)
+{
+	if (wb::gxdebug::Headless())
+		return;
+
+	FlushVertex();
+
+	g_draw.vertex_pending = true;
+	g_draw.vertex_3d = true;
+	g_draw.x = x;
+	g_draw.y = y;
+	g_draw.z = z;
+	g_draw.have_color = false;
+	g_draw.texcoord_count = 0;
+}
+
+void 	GX_Color4u8 (uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+	if (wb::gxdebug::Headless())
+		return;
+
+	g_draw.have_color = true;
+	g_draw.color[0] = r;
+	g_draw.color[1] = g;
+	g_draw.color[2] = b;
+	g_draw.color[3] = a;
+}
+
+void 	GX_TexCoord2f32 (f32 s, f32 t)
+{
+	if (wb::gxdebug::Headless() || g_draw.texcoord_count == 8)
+		return;
+
+	g_draw.texcoords[g_draw.texcoord_count][0] = s;
+	g_draw.texcoords[g_draw.texcoord_count][1] = t;
+	++g_draw.texcoord_count;
+}
+
+// ---- host side ----------------------------------------------------------------------------
+
+void 	WGX_InitFrameState (int width, int height)
+{
+	if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_GX))
+		wb::gxdebug::Log("[gx] WGX_InitFrameState(%d, %d)", width, height);
+
+	GX_SetViewport(0.f, 0.f, static_cast<f32>(width), static_cast<f32>(height), 0.f, 1.f);
+
+	Mtx44 projection;
+	guOrtho(projection, 1.f, -1.f, -1.f, 1.f, -1000.f, 1000.f);
+	GX_LoadProjectionMtx(projection, GX_ORTHOGRAPHIC);
+
+	Mtx identity;
+	guMtxIdentity(identity);
+	GX_LoadPosMtxImm(identity, GX_PNMTX0);
+
+	GX_SetZMode(GX_TRUE, GX_ALWAYS, GX_TRUE);
+
+	if (!wb::gxdebug::Headless())
+		glEnable(GL_STENCIL_TEST);
+}
+
+void 	WGX_BeginFrame (void)
+{
+	if (wb::gxdebug::Tracing(wb::gxdebug::TRACE_GX))
+		wb::gxdebug::Log("[gx] WGX_BeginFrame()");
+
+	Mtx44 projection;
+	guOrtho(projection, 1.f, -1.f, -1.f, 1.f, -1000.f, 1000.f);
+
+	Mtx identity;
+	guMtxIdentity(identity);
+
+	if (wb::gxdebug::Headless())
+		return;
+
+	glMatrixMode(GL_TEXTURE);
+	glLoadIdentity();
+	g_draw.tex_mtx_dirty = true;
+
+	GX_LoadProjectionMtx(projection, GX_ORTHOGRAPHIC);
+	GX_LoadPosMtxImm(identity, GX_PNMTX0);
+
+	glStencilFunc(GL_ALWAYS, 0, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+	glClearColor(g_draw.clear_color.r / 255.f, g_draw.clear_color.g / 255.f, g_draw.clear_color.b / 255.f,
+		g_draw.clear_color.a / 255.f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+}
+
+void 	WGX_ReadPixels (int x, int y, int width, int height, void *rgba)
+{
+	if (wb::gxdebug::Headless())
+		return;
+
+	glFinish();
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+}
+
+static GLuint g_offscreen_framebuffer = 0;
+static GLuint g_offscreen_depth = 0;
+static GLuint g_offscreen_color = 0;
+
+bool 	WGX_CreateOffscreenTarget (int width, int height)
+{
+	if (wb::gxdebug::Headless())
+		return true;
+
+	glGenFramebuffers(1, &g_offscreen_framebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, g_offscreen_framebuffer);
+
+	glGenTextures(1, &g_offscreen_color);
+	glBindTexture(GL_TEXTURE_2D, g_offscreen_color);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_offscreen_color, 0);
+
+	glGenRenderbuffers(1, &g_offscreen_depth);
+	glBindRenderbuffer(GL_RENDERBUFFER, g_offscreen_depth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g_offscreen_depth);
+
+	return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
+
+void 	WGX_DestroyOffscreenTarget (void)
+{
+	if (wb::gxdebug::Headless())
+		return;
+
+	if (g_offscreen_depth)
+		glDeleteRenderbuffers(1, &g_offscreen_depth);
+
+	if (g_offscreen_color)
+		glDeleteTextures(1, &g_offscreen_color);
+
+	if (g_offscreen_framebuffer)
+		glDeleteFramebuffers(1, &g_offscreen_framebuffer);
+
+	g_offscreen_depth = 0;
+	g_offscreen_color = 0;
+	g_offscreen_framebuffer = 0;
+}
+
+namespace wb::gxdebug
+{
+
+void DumpWrapGxState(std::ostream& os)
+{
+	Print(os, "WrapGx state:\n");
+
+	if (sizeof(GLTexObj) > sizeof(GXTexObj))
+		Print(os, "  !! sizeof(GLTexObj)=%zu but sizeof(GXTexObj)=%zu: GLTexObj is cast onto a GXTexObj, so its LOD fields\n"
+			"  !! (min_lod, lod_bias, bias_clamp, edge_lod) are read and written outside of the object\n",
+			sizeof(GLTexObj), sizeof(GXTexObj));
+	else
+		Print(os, "  sizeof(GLTexObj)=%zu sizeof(GXTexObj)=%zu\n", sizeof(GLTexObj), sizeof(GXTexObj));
+
+	Print(os, "  active TEV configuration (%zu stage(s)):\n", g_active_stages.size());
+	DescribeShaderConfig(os, g_active_stages, g_active_texgens, CurrentIndStages());
+
+	for (unsigned i = 0; i != 3; ++i)
+		Print(os, "  color register REG%u: (%d,%d,%d,%d)\n", i,
+			int(g_color_registers[i][0] * 255.f + (g_color_registers[i][0] < 0 ? -0.5f : 0.5f)),
+			int(g_color_registers[i][1] * 255.f + (g_color_registers[i][1] < 0 ? -0.5f : 0.5f)),
+			int(g_color_registers[i][2] * 255.f + (g_color_registers[i][2] < 0 ? -0.5f : 0.5f)),
+			int(g_color_registers[i][3] * 255.f + (g_color_registers[i][3] < 0 ? -0.5f : 0.5f)));
+
+	for (unsigned i = 0; i != 4; ++i)
+		Print(os, "  konst color K%u: %s\n", i, names::Color(unsigned(g_kcolor_registers[i][0] * 255.f + 0.5f),
+			unsigned(g_kcolor_registers[i][1] * 255.f + 0.5f), unsigned(g_kcolor_registers[i][2] * 255.f + 0.5f),
+			unsigned(g_kcolor_registers[i][3] * 255.f + 0.5f)).c_str());
+
+	for (unsigned i = 0; i != 4; ++i)
+		Print(os, "  swap table %u: %s\n", i, names::SwapTable(g_tev_swap_tables[i]).c_str());
+
+	for (unsigned i = 0; i != 12; ++i)
+	{
+		const IndTexMtx& m = g_ind_tex_mtx[i];
+		if (m.set)
+			Print(os, "  indirect matrix %s: [[%g %g %g] [%g %g %g]] scale_exp=%d\n", names::IndMtx(i + GX_ITM_0).c_str(),
+				double(m.m[0][0]), double(m.m[0][1]), double(m.m[0][2]), double(m.m[1][0]), double(m.m[1][1]),
+				double(m.m[1][2]), int(m.scale_exp));
+	}
+
+	for (unsigned i = 0; i != 8; ++i)
+		if (g_texmap_dims[i][0] || g_texmap_dims[i][1])
+			Print(os, "  texture map %u: %gx%g\n", i, double(g_texmap_dims[i][0]), double(g_texmap_dims[i][1]));
+
+	for (const auto& tlut : g_tlut_names)
+		Print(os, "  tlut %u: lut=%p entries=%u fmt=%s\n", GXU(tlut.first), tlut.second.lut, GXU(tlut.second.entries),
+			names::TlutFormat(tlut.second.fmt).c_str());
+
+	Print(os, "  %zu texture(s) in the GL cache, %zu shader(s) compiled\n", g_texture_cache.size(), g_compiled_tev_stages.size());
+}
+
 }

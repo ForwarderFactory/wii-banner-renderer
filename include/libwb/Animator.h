@@ -28,6 +28,8 @@ distribution.
 #include <map>
 #include <tuple>
 #include <cstring>
+#include <iosfwd>
+#include <string>
 
 #include <libwb/Types.h>
 
@@ -77,6 +79,8 @@ public:
 
 	[[nodiscard]] KeyData GetFrame(FrameNumber frame_number) const;
 
+	void DebugDescribe(std::ostream& os) const;
+
 private:
 	std::map<FrameNumber, KeyData> keys;
 };
@@ -95,9 +99,13 @@ public:
 
 	void DebugPrint() const;
 
+	void DebugDescribe(std::ostream& os) const;
+
 private:
 	std::multimap<FrameNumber, KeyData> keys;
 };
+
+std::string DescribeKeyTarget(AnimationType type, uint8_t target);
 
 inline uint8_t ClampToByte(float value)
 {
@@ -122,6 +130,8 @@ public:
 	virtual void SetFrame(FrameNumber frame, uint8_t key_set);
 
 	void DebugPrintKeys() const;
+
+	void DebugDescribeKeys(std::ostream& os, int indent) const;
 
 protected:
 	Animator() = default;

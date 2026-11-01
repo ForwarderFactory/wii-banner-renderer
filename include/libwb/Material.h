@@ -29,6 +29,9 @@ distribution.
 #include <libwb/Funcs.h>
 #include <libwb/WrapGx.h>
 
+#include <iosfwd>
+#include <string>
+
 namespace wb
 {
 
@@ -44,6 +47,10 @@ public:
 	};
 
 	void DebugPrintSrts() const;
+
+	void DebugDescribe(std::ostream& os, const Resources& resources, int indent) const;
+
+	std::string DebugState() const;
 
 	static constexpr uint32_t MAX_TEX_MAP = 8;
 	static constexpr uint32_t MAX_TEX_SRT = 10;

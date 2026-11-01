@@ -22,8 +22,10 @@ distribution.
 */
 #pragma once
 
+#include <cstdint>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace wb::Wad {
     struct ExtractedFile {

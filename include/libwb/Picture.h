@@ -38,6 +38,8 @@ public:
 	static const uint32_t BINARY_MAGIC = MAKE_FOURCC('p', 'i', 'c', '1');
 
 	void Load(std::istream& file);
+
+	const char* TypeName() const override { return "Picture"; }
 };
 
 }

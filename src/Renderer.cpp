@@ -23,14 +23,14 @@ distribution.
 
 #include "../include/libwb/Renderer.h"
 
+#include <GL/glew.h>
+
 #include <memory>
 
 #include "../include/libwb/WrapGx.h"
 #if defined(__APPLE__)
-#include <GL/glew.h>
 #include <OpenGL/OpenGL.h>
 #else
-#include <GL/glew.h>
 #include <GL/gl.h>
 #endif
 
@@ -68,18 +68,7 @@ namespace wb {
         this->CreateContext();
 
         GX_Init(0, 0);
-        glViewport(0, 0, width, height);
-
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(-1.0, 1.0, -1.0, 1.0, -1000.0, 1000.0);
-
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        glEnable(GL_STENCIL_TEST);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_ALWAYS);
+        WGX_InitFrameState(width, height);
     }
 #else
     Renderer::Renderer(int width, int height)
@@ -89,21 +78,8 @@ namespace wb {
         this->CreateContext();
         this->CreateFramebuffer();
 
-        glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
-
         GX_Init(0, 0);
-        glViewport(0, 0, width, height);
-
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(-1.0, 1.0, -1.0, 1.0, -1000.0, 1000.0);
-
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        glEnable(GL_STENCIL_TEST);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_ALWAYS);
+        WGX_InitFrameState(width, height);
     }
 #endif
 
@@ -196,72 +172,13 @@ namespace wb {
     }
 #elifdef GL_MACOS
     void Renderer::CreateFramebuffer() {
-        glGenFramebuffers(1, &m_framebuffer);
-        glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
-
-        glGenTextures(1, &m_color_texture);
-        glBindTexture(GL_TEXTURE_2D, m_color_texture);
-
-        glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            GL_RGBA8,
-            m_width,
-            m_height,
-            0,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            nullptr
-        );
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        glFramebufferTexture2D(
-            GL_FRAMEBUFFER,
-            GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D,
-            m_color_texture,
-            0
-        );
-
-        glGenRenderbuffers(1, &m_depth_buffer);
-        glBindRenderbuffer(GL_RENDERBUFFER, m_depth_buffer);
-
-        glRenderbufferStorage(
-            GL_RENDERBUFFER,
-            GL_DEPTH24_STENCIL8,
-            m_width,
-            m_height
-        );
-
-        glFramebufferRenderbuffer(
-            GL_FRAMEBUFFER,
-            GL_DEPTH_STENCIL_ATTACHMENT,
-            GL_RENDERBUFFER,
-            m_depth_buffer
-        );
-
-        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-
-        if (status != GL_FRAMEBUFFER_COMPLETE)
+        if (!WGX_CreateOffscreenTarget(m_width, m_height))
             throw std::runtime_error("Framebuffer incomplete");
     }
 
     void Renderer::DestroyFramebuffer()
     {
-        if (m_depth_buffer)
-            glDeleteRenderbuffers(1, &m_depth_buffer);
-
-        if (m_color_texture)
-            glDeleteTextures(1, &m_color_texture);
-
-        if (m_framebuffer)
-            glDeleteFramebuffers(1, &m_framebuffer);
-
-        m_depth_buffer = 0;
-        m_color_texture = 0;
-        m_framebuffer = 0;
+        WGX_DestroyOffscreenTarget();
     }
 
     void Renderer::CreateContext()
@@ -456,40 +373,12 @@ namespace wb {
     {
         MakeCurrent();
 
-        glMatrixMode(GL_TEXTURE);
-        glLoadIdentity();
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(-1.0, 1.0, -1.0, 1.0, -1000.0, 1000.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        glStencilFunc(GL_ALWAYS, 0, 0xFF);
-        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-
-        glClearColor(0, 0, 0, 1);
-        glClear(
-            GL_COLOR_BUFFER_BIT |
-            GL_DEPTH_BUFFER_BIT |
-            GL_STENCIL_BUFFER_BIT
-        );
+        WGX_BeginFrame();
     }
 
     void Renderer::EndFrame()
     {
-        glFinish();
-
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
-
-        glReadPixels(
-            0,
-            0,
-            m_width,
-            m_height,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            m_pixels.data()
-        );
+        WGX_ReadPixels(0, 0, m_width, m_height, m_pixels.data());
     }
 
     bool Renderer::SavePNG(const std::string& path, int width, int height)

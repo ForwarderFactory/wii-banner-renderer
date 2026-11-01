@@ -25,6 +25,8 @@ distribution.
 #ifndef WII_BNR_BANNER_H_
 #define WII_BNR_BANNER_H_
 
+#include <iosfwd>
+
 #include "Layout.h"
 #include "Logger.h"
 #include "Sound.h"
@@ -39,6 +41,11 @@ public:
 	~Banner();
 
 	[[nodiscard]] Layout* GetBanner() const { return layout_banner; }
+	static constexpr float BANNER_WIDTH = 608.f;
+	static constexpr float BANNER_HEIGHT = 456.f;
+	static constexpr float ICON_WIDTH = 128.f;
+	static constexpr float ICON_HEIGHT = 96.f;
+
 	[[nodiscard]] Layout* GetIcon() const { return layout_icon; }
 	[[nodiscard]] Sound* GetSound() const { return sound; }
 
@@ -48,7 +55,7 @@ public:
 	void LoadIcon()
 	{
 		if (offset_icon && !layout_icon)
-			layout_icon = LoadLayout("Icon", offset_icon, Vec2f(128.f, 96.f));
+			layout_icon = LoadLayout("Icon", offset_icon, Vec2f(ICON_WIDTH, ICON_HEIGHT));
 	}
 
 	void LoadSound();
@@ -60,6 +67,8 @@ public:
 	void UnloadSound() { delete sound; sound = nullptr; }
 
 	static Logger& GetLogger();
+
+	void DebugDescribeContainer(std::ostream& os) const;
 
 private:
 	Layout* LoadLayout(const std::string& lyt_name, std::streamoff offset, Vec2f size);

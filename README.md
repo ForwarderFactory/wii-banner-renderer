@@ -9,12 +9,14 @@ This program allows you to render a Wii banner to a video file.
 It is based on the work of the Wii Banner Player team, with some code taken
 from WiiFlow and USB Loader GX.
 
-The project consists of two parts:
+The project consists of four parts:
 
 - libwb (required)
   - C++ library which exposes almost all the banner handling. This, long term, should be cross-platform but that's not the case as of now.
 - wbr
   - CLI utility which renders a banner to a video file using FFmpeg. Runs on Windows, macOS and Linux.
+- wbd
+  - Banner debugger. Prints everything that was parsed and "renders" frames without drawing, see below.
 - wbp
   - Banner player, independent of wbr, which allows you to preview and view a ton of channels in real time.
 
@@ -46,8 +48,6 @@ doing this is not possible.
 
 Run the GUI application and select your channels using the + button. You can then use your mouse
 or arrow keys to select channels to view.
-
-If you would like debugging information, set WBP_DEBUG=1 in your environment.
 
 ## Dependencies
 

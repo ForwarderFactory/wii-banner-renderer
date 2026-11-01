@@ -21,10 +21,11 @@ misrepresented as being the original software.
 distribution.
 */
 
-#include <GL/glew.h>
 
 #include "../include/libwb/Window.h"
 #include "../include/libwb/Endian.h"
+#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/Layout.h"
 
 namespace wb
 {
@@ -61,12 +62,33 @@ void Window::Load(std::istream& file)
 	});
 }
 
-void Window::Draw(const Resources& resources, uint8_t render_alpha) const
+void Window::DebugDescribe(std::ostream& os, const Resources& resources, int indent) const
+{
+	Quad::DebugDescribe(os, resources, indent);
+
+	gxdebug::Print(os, "%*sinflation: left=%g right=%g top=%g bottom=%g (not rendered yet)\n", indent + 2, "",
+		static_cast<double>(inflation.l), static_cast<double>(inflation.r),
+		static_cast<double>(inflation.t), static_cast<double>(inflation.b));
+
+	for (size_t i = 0; i != frames.size(); ++i)
+	{
+		gxdebug::Print(os, "%*sframe %zu: material #%u", indent + 2, "", i, static_cast<unsigned>(frames[i].material_index));
+
+		if (frames[i].material_index < resources.materials.size())
+			gxdebug::Print(os, " '%s'", resources.materials[frames[i].material_index]->GetName().c_str());
+		else
+			gxdebug::Print(os, " !! OUT OF RANGE");
+
+		gxdebug::Print(os, " texture_flip=%u (not rendered yet)\n", static_cast<unsigned>(frames[i].texture_flip));
+	}
+}
+
+void Window::Draw(const Resources& resources, uint8_t render_alpha, Mtx mtx) const
 {
 	// TODO: handle "inflation"
 	// TODO: handle "frames" and "texture_flip"
 
-	Quad::Draw(resources, render_alpha);
+	Quad::Draw(resources, render_alpha, mtx);
 }
 
 }

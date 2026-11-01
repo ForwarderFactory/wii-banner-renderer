@@ -110,10 +110,6 @@ namespace wb {
 #if defined(__APPLE__)
         void CreateFramebuffer();
         void DestroyFramebuffer();
-
-        uint32_t m_framebuffer = 0;
-        uint32_t m_depth_buffer = 0;
-        uint32_t m_color_texture = 0;
 #endif
 
         int m_width;

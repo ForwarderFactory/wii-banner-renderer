@@ -28,6 +28,7 @@ distribution.
 #define WII_BNR_FONT_H_
 
 #include <istream>
+#include <iosfwd>
 #include <vector>
 
 #include <libwb/Pane.h>
@@ -65,6 +66,8 @@ public:
 	[[nodiscard]] bool GetGlyph(uint16_t character, Glyph& glyph) const;
 
 	bool Apply(uint16_t sheet_index) const;
+
+	void DebugDescribe(std::ostream& os, int indent) const;
 
 private:
 	struct CodeMap

@@ -30,6 +30,7 @@ distribution.
  * im choosing not to do so as of now, we'll see how that ends up.
  */
 
+#include <cstdint>
 #include <cstring>
 
 #define 	GX_MAX_TEVREG   4
@@ -77,7 +78,64 @@ distribution.
 #define		GX_SRC_REG		0	// use the material's constant register color
 #define		GX_SRC_VTX		1	// use the per-vertex color
 
+// ---- drawing: matrices, vertex data and frame state ------------------------------------
+// These follow libogc's names, values and call order (gu.h / gx.h), so code written against
+// this header also compiles against libogc on a Wii. OpenGL is only used inside WrapGx.cpp.
+
+#define		GX_TRUE	1
+#define		GX_FALSE	0
+
+#define		GX_PNMTX0	0	// position matrix slot 0, the only one wb draws with
+#define		GX_MTX3x4	0
+#define		GX_MTX2x4	1
+#define		GX_PERSPECTIVE	0
+#define		GX_ORTHOGRAPHIC	1
+
+#define		GX_NEVER	0
+#define		GX_LESS	1
+#define		GX_EQUAL	2
+#define		GX_LEQUAL	3
+#define		GX_GREATER	4
+#define		GX_NEQUAL	5
+#define		GX_GEQUAL	6
+#define		GX_ALWAYS	7
+
+#define		GX_POINTS	0xb8
+#define		GX_LINES	0xa8
+#define		GX_LINESTRIP	0xb0
+#define		GX_TRIANGLES	0x90
+#define		GX_TRIANGLESTRIP	0x98
+#define		GX_TRIANGLEFAN	0xa0
+#define		GX_QUADS	0x80
+
+#define		GX_VTXFMT0	0
+
+#define		GX_VA_POS	9
+#define		GX_VA_NRM	10
+#define		GX_VA_CLR0	11
+#define		GX_VA_CLR1	12
+#define		GX_VA_TEX0	13
+#define		GX_VA_TEX7	20
+
+#define		GX_NONE	0
+#define		GX_DIRECT	1
+
+#define		GX_POS_XY	0
+#define		GX_POS_XYZ	1
+#define		GX_CLR_RGB	0
+#define		GX_CLR_RGBA	1
+#define		GX_TEX_S	0
+#define		GX_TEX_ST	1
+
+#define		GX_F32	4
+#define		GX_RGBA8	5
+
+#define		GX_COLOR0A0	4
+
 typedef float f32;
+
+typedef f32 Mtx[3][4];
+typedef f32 Mtx44[4][4];
 
 // watev
 struct GXTexObj
@@ -114,7 +172,42 @@ typedef void GXFifoObj;
 
 GXFifoObj * 	GX_Init (void *base, uint32_t size);
 
-//void 	GX_SetViewport (f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ);
+void	guMtxIdentity (Mtx mt);
+void	guMtxConcat (const Mtx a, const Mtx b, Mtx ab);
+void	guMtxTrans (Mtx mt, f32 xT, f32 yT, f32 zT);
+void	guMtxScale (Mtx mt, f32 xS, f32 yS, f32 zS);
+void	guMtxRotRad (Mtx mt, char axis, f32 rad);
+void	guMtxRotDeg (Mtx mt, char axis, f32 deg);
+void	guOrtho (Mtx44 mt, f32 t, f32 b, f32 l, f32 r, f32 n, f32 f);
+
+void	GX_SetViewport (f32 xOrig, f32 yOrig, f32 wd, f32 ht, f32 nearZ, f32 farZ);
+void	GX_LoadProjectionMtx (Mtx44 mt, uint8_t type);
+void	GX_LoadPosMtxImm (Mtx mt, uint32_t pnidx);
+void	GX_SetCurrentMtx (uint32_t mtx);
+void	GX_LoadTexMtxImm (Mtx mt, uint32_t texidx, uint8_t type);
+
+void	GX_SetZMode (uint8_t enable, uint8_t func, uint8_t update_enable);
+void	GX_SetChanMatColor (int32_t channel, GXColor color);
+void	GX_SetCopyClear (GXColor clear_clr, uint32_t clear_z);
+
+void	GX_ClearVtxDesc (void);
+void	GX_SetVtxDesc (uint8_t attr, uint8_t type);
+void	GX_SetVtxAttrFmt (uint8_t vtxfmt, uint32_t vtxattr, uint32_t comptype, uint32_t compsize, uint32_t frac);
+void	GX_Begin (uint8_t primitve, uint8_t vtxfmt, uint16_t vtxcnt);
+void	GX_End (void);
+void	GX_Position2f32 (f32 x, f32 y);
+void	GX_Position3f32 (f32 x, f32 y, f32 z);
+void	GX_Color4u8 (uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+void	GX_TexCoord2f32 (f32 s, f32 t);
+
+void	WGX_InitFrameState (int width, int height);
+
+void	WGX_BeginFrame (void);
+
+void	WGX_ReadPixels (int x, int y, int width, int height, void *rgba);
+
+bool	WGX_CreateOffscreenTarget (int width, int height);
+void	WGX_DestroyOffscreenTarget (void);
 
 uint32_t 	GX_GetTexBufferSize (uint16_t wd, uint16_t ht, uint32_t fmt, uint8_t mipmap, uint8_t maxlod);
 
