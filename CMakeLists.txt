@@ -18,7 +18,7 @@ add_library(wb STATIC
         src/Animator.cpp
         src/Banner.cpp
         src/Endian.cpp
-        src/GxDebug.cpp
+        src/GXDebug.cpp
         src/Font.cpp
         src/Layout.cpp
         src/Material.cpp
