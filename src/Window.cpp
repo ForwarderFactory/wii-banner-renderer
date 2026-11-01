@@ -24,7 +24,7 @@ distribution.
 
 #include "../include/libwb/Window.h"
 #include "../include/libwb/Endian.h"
-#include "../include/libwb/GxDebug.h"
+#include "../include/libwb/GXDebug.h"
 #include "../include/libwb/Layout.h"
 
 namespace wb
