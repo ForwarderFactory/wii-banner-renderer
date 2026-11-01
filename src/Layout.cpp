@@ -30,7 +30,7 @@ distribution.
 #include <libwb/Textbox.h>
 #include <libwb/Window.h>
 #include <libwb/Endian.h>
-#include <libwb/GxDebug.h>
+#include <libwb/GXDebug.h>
 
 #include <cctype>
 #include <cstdio>
