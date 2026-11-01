@@ -34,7 +34,7 @@ distribution.
 #include <libwb/Material.h>
 #include <libwb/Endian.h>
 #include <libwb/Funcs.h>
-#include <libwb/GxDebug.h>
+#include <libwb/GXDebug.h>
 #include <libwb/Layout.h>
 #include <libwb/Texture.h>
 
